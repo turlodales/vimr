@@ -360,7 +360,9 @@ extension NvimView {
   }
 
   private func flush() {
-    for region in self.regionsToFlush { self.markForRender(region: region) }
+    for region in self.regionsToFlush {
+      self.markForRender(region: region)
+    }
     self.regionsToFlush.removeAll(keepingCapacity: true)
   }
 
@@ -506,12 +508,13 @@ extension NvimView {
 
     self.bridgeLogger.debug(cwd)
     self._cwd = URL(fileURLWithPath: cwd)
+    self.tabBar?.cwd = cwd
     self.eventsSubject.onNext(.cwdChanged)
   }
 
   private func colorSchemeChanged(_ value: MessagePackValue) {
     guard let values = MessagePackUtils.array(
-      from: value, ofSize: 7, conversion: { $0.intValue }
+      from: value, ofSize: 11, conversion: { $0.intValue }
     ) else {
       self.bridgeLogger.error("Could not convert \(value)")
       return
@@ -730,7 +733,7 @@ extension NvimView {
   }
 
   func focusGained(_ gained: Bool) -> Completable {
-    self.api.uiSetFocus(gained: gained)
+    self.api.nvimUiSetFocus(gained: gained)
   }
 
   private func quit() -> Completable {

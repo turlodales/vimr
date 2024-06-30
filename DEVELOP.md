@@ -1,19 +1,26 @@
 ## How to develop
 
-To build Neovim for development, i.e., no universal binary, do the following
+VimR includes a stock Neovim. From Neovim `v0.10.0`, we provide pre-built universal Neovim,
+see for instance <https://github.com/qvacua/vimr/releases/tag/neovim-v0.10.0-20240527.232810>.
+In most cases, you can use the pre-built Neovim.
+Run the following
 
 ```bash
-clean=false for_dev=true ./bin/build_nvimserver.sh
+clean=true for_dev=false ./bin/build_nvimserver.sh
 ```
 
-You can set `clean=true` if you want to clean the existing build.
+to download and place the files in the appropriate places.
+Now, you can just *run* VimR target in Xcode.
 
-### Generating sources when upgrading Neovim
+If you want to build Neovim locally, you can use
 
 ```bash
-clean=true ./RxPack/bin/generate_sources.sh # generate API methods
-clean=false for_dev=true ./bin/build_nvimserver.sh # generate auto commands and cursor modes
+clean=true for_dev=true ./bin/build_nvimserver.sh
 ```
+
+Afterwards, you can run VimR target in Xcode.
+
+(This is used when generating source since we need some generated header files.)
 
 ### How to enable the Debug menu in Release build
 
@@ -22,6 +29,23 @@ defaults write com.qvacua.VimR enable-debug-menu 1
 ```
 
 ## How to release
+
+### Neovim
+
+* Update Neovim and generate sources:
+    ```bash
+    clean=true use_committed_nvim=true ./bin/generate_sources.sh
+    ```
+  Use `use_committed=false` if you want to use modified local Neovim submodule.
+* Commit and push.
+* Tag and push with the following
+    ```bash
+   version=neovim-vX.Y.Z-$(date "+%Y%m%d.%H%M%S"); git tag -a "${version}" -m "${version}"; git push origin "${version}"
+    ```
+* Github action will build universal binary + runtime and package it.
+* Update the version of Neovim in `/bin/neovim/resources/buildInfo.json`
+
+### VimR
 
 * Set a new version of VimR via
     ```bash

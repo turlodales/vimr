@@ -19,7 +19,6 @@ final class MainWindowReducer: ReducerType {
     case let .cd(to: cwd):
       if state.cwd != cwd {
         state.cwd = cwd
-        state.cwdToSet = cwd // Ensure updates also pend to tab bar
       }
 
     case let .setBufferList(buffers):
@@ -53,7 +52,7 @@ final class MainWindowReducer: ReducerType {
 
     case let .setToolsState(tools):
       state.orderedTools = []
-      tools.forEach { toolPair in
+      for toolPair in tools {
         let toolId = toolPair.0
         let tool = toolPair.1
 

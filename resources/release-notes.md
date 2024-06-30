@@ -1,5 +1,37 @@
 # Next
 
+* GH-1078: Fix lcd/tcd. Thanks @shanesmith for the PR!
+
+# 0.47.4-20240626.190016
+
+* GH-1075: Fix "E1502: Lua failed to grow stack to 4001". Thanks @shanesmith for the PR!
+* Dependencies updates:
+  - sparkle-project/Sparkle@2.7.3
+  - apple/swift-collections@1.1.1
+
+# v0.47.3-20240616.090032
+
+* GH-1072: Match the tab colors 1:1 with Neovim's `colorscheme`; thanks @s-daveb for the PR!
+* GH-1073: Scroll the window content instead of moving the cursor; thanks @shanesmith for the PR!
+
+# v0.47.2-20240531.221846
+
+* Always use live resizing
+* Dependencies updates:
+  - sparkle-project/Sparkle@2.7.2
+  - ReactiveX/RxSwift@6.7.1
+
+# v0.47.1-20240528.171603
+
+* Neovim 0.10.0 😀
+  - 0.47.0 did not contain the generated API methods for Neovim 0.10.0...
+
+# v0.47.0-20240528.165939
+
+* Neovim 0.10.0 😀
+
+# v0.46.2-20240517.102525
+
 * GH-1059: Improved coloring of custom tabs; thanks @s-daveb for the PR!
 
 # v0.46.1-20240426.143700

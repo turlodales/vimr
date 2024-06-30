@@ -370,10 +370,12 @@ def parse_params(raw_params):
 def parse_function(f):
     args = parse_args(f['parameters'])
     template = void_func_template if f['return_type'] == 'void' else func_template
-    template = get_mode_func_template if f['name'] == 'nvim_get_mode' else template
+    nvim_func_name = f['name']
+    template = get_mode_func_template if nvim_func_name == 'nvim_get_mode' else template
+
     result = template.substitute(
-        func_name=snake_to_camel(f['name'][5:]),
-        nvim_func_name=f['name'],
+        func_name=snake_to_camel(nvim_func_name),
+        nvim_func_name=nvim_func_name,
         args=args,
         params=parse_params(f['parameters']),
         result_type=nvim_type_to_swift(f['return_type']),
@@ -414,10 +416,10 @@ if __name__ == '__main__':
     nvim_path = os.environ['NVIM_PATH'] if 'NVIM_PATH' in os.environ else 'nvim'
 
     nvim_output = subprocess.run([nvim_path, '--api-info'], stdout=subprocess.PIPE)
-    api = msgpack.unpackb(nvim_output.stdout)
+    api = msgpack.unpackb(nvim_output.stdout, raw=False)
 
     version = parse_version(api['version'])
-    functions = api['functions']  #[f for f in api['functions'] if 'deprecated_since' not in f]
+    functions = api['functions']
     body = '\n'.join([parse_function(f) for f in functions])
 
     result = extension_template.substitute(

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-readonly clean=${clean:?"true or false"}
+clean=${clean:?"true or false"}
 readonly use_committed_nvim=${use_committed_nvim:?"If true, checkout the committed version of nvim, otherwise use the workspace."}
 
 main() {
@@ -24,15 +24,15 @@ main() {
       nvim_version="v$major.$minor.$patch$prerelease"
       echo "### Using nvim version: $nvim_version"
 
-      ../bin/neovim/bin/build_neovim.sh
-    popd > /dev/null
+      for_dev=true ../bin/build_nvimserver.sh
 
-    pushd Neovim
       version=${nvim_version} ../bin/generate_autocmds.py > "../NvimView/Sources/NvimView/NvimAutoCommandEvent.generated.swift"
       version=${nvim_version} ../bin/generate_cursor_shape.py > "../NvimView/Sources/NvimView/NvimCursorModeShape.generated.swift"
       swiftformat "../NvimView/Sources/NvimView/NvimAutoCommandEvent.generated.swift"
       swiftformat "../NvimView/Sources/NvimView/NvimCursorModeShape.generated.swift"
     popd > /dev/null
+
+    clean=false ./RxPack/bin/generate_sources.sh
 
   popd > /dev/null
   echo "### Successfully generated autocmds."

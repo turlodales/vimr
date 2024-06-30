@@ -22,16 +22,6 @@ extension NvimView {
       return
     }
 
-    if self.usesLiveResize {
-      self.resizeNeoVimUi(to: newSize)
-      return
-    }
-
-    if self.inLiveResize || self.currentlyResizing { return }
-
-    // There can be cases where the frame is resized not by live resizing,
-    // eg when the window is resized by window management tools.
-    // Thus, we make sure that the resize call is made when this happens.
     self.resizeNeoVimUi(to: newSize)
   }
 
@@ -48,8 +38,6 @@ extension NvimView {
   }
 
   func resizeNeoVimUi(to size: CGSize) {
-    self.currentEmoji = self.randomEmoji()
-
     let discreteSize = self.discreteSize(size: size)
     if discreteSize == self.ugrid.size {
       self.markForRenderWholeView()
@@ -59,7 +47,7 @@ extension NvimView {
     self.offset.x = floor((size.width - self.cellSize.width * discreteSize.width.cgf) / 2)
     self.offset.y = floor((size.height - self.cellSize.height * discreteSize.height.cgf) / 2)
 
-    self.api.uiTryResize(width: discreteSize.width, height: discreteSize.height)
+    self.api.nvimUiTryResize(width: discreteSize.width, height: discreteSize.height)
       .subscribe(onError: { [weak self] error in
         self?.log.error("Error in \(#function): \(error)")
       })
@@ -99,7 +87,7 @@ extension NvimView {
     // NvimView.swift
     try? self.api.run(inPipe: inPipe, outPipe: outPipe, errorPipe: errorPipe)
       .andThen(
-        self.api.getApiInfo(errWhenBlocked: false)
+        self.api.nvimGetApiInfo(errWhenBlocked: false)
           .flatMapCompletable { value in
             guard let info = value.arrayValue,
                   info.count == 2,
@@ -122,19 +110,29 @@ extension NvimView {
             }
 
             // swiftformat:disable all
-            return self.api.exec2(src: """
-            let g:gui_vimr = 1
-            autocmd VimLeave * call rpcnotify(\(channel), 'autocommand', 'vimleave')
-            autocmd VimEnter * call rpcnotify(\(channel), 'autocommand', 'vimenter')
-            autocmd ColorScheme * call rpcnotify(\(channel), 'autocommand', 'colorscheme', get(nvim_get_hl(0, {'id': hlID('Normal')}), 'fg', -1), get(nvim_get_hl(0, {'id': hlID('Normal')}), 'bg', -1), get(nvim_get_hl(0, {'id': hlID('Visual')}), 'fg', -1), get(nvim_get_hl(0, {'id': hlID('Visual')}), 'bg', -1), get(nvim_get_hl(0, {'id': hlID('Directory')}), 'fg', -1), get(nvim_get_hl(0, {'id': hlID('TablineSel')}), 'bg', -1), get(nvim_get_hl(0, {'id': hlID('TablineSel')}), 'fg', -1))
-            autocmd VimEnter * call rpcrequest(\(channel), 'vimenter')
-            """, opts: [:], errWhenBlocked: false)
-            // swiftformat:enable all
-              .asCompletable()
+          let vimscript = """
+          function! GetHiColor(hlID, component)
+            let color = synIDattr(synIDtrans(hlID(a:hlID)), a:component)
+            if empty(color)
+              return -1
+            else
+              return str2nr(color[1:], 16)
+            endif
+          endfunction
+          let g:gui_vimr = 1
+          autocmd VimLeave * call rpcnotify(\(channel), 'autocommand', 'vimleave')
+          autocmd VimEnter * call rpcnotify(\(channel), 'autocommand', 'vimenter')
+          autocmd ColorScheme * call rpcnotify(\(channel), 'autocommand', 'colorscheme', GetHiColor('Normal', 'fg'), GetHiColor('Normal', 'bg'), GetHiColor('Visual', 'fg'), GetHiColor('Visual', 'bg'), GetHiColor('Directory', 'fg'), GetHiColor('TablineFill', 'bg'), GetHiColor('TablineFill', 'fg'), GetHiColor('Tabline', 'bg'), GetHiColor('Tabline', 'fg'), GetHiColor('TablineSel', 'bg'), GetHiColor('TablineSel', 'fg'))
+          autocmd VimEnter * call rpcrequest(\(channel), 'vimenter')
+          """
+
+          return self.api.nvimExec2(src: vimscript, opts: [:], errWhenBlocked: false)
+            .asCompletable()
+          // swiftformat:enable all
           }
       )
       .andThen(
-        self.api.uiAttach(width: size.width, height: size.height, options: [
+        self.api.nvimUiAttach(width: size.width, height: size.height, options: [
           "ext_linegrid": true,
           "ext_multigrid": false,
           "ext_tabline": MessagePackValue(self.usesCustomTabBar),

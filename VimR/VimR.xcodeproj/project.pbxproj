@@ -1126,7 +1126,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 20240517.102525;
+				CURRENT_PROJECT_VERSION = 20240630.155444;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_MODULE_VERIFIER = YES;
@@ -1192,7 +1192,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 20240517.102525;
+				CURRENT_PROJECT_VERSION = 20240630.155444;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_MODULE_VERIFIER = YES;
@@ -1225,7 +1225,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20240517.102525;
+				CURRENT_PROJECT_VERSION = 20240630.155444;
 				DEFINES_MODULE = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				IBC_MODULE = VimR;
@@ -1250,7 +1250,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20240517.102525;
+				CURRENT_PROJECT_VERSION = 20240630.155444;
 				DEFINES_MODULE = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				IBC_MODULE = VimR;
@@ -1361,7 +1361,7 @@
 			repositoryURL = "https://github.com/ReactiveX/RxSwift";
 			requirement = {
 				kind = exactVersion;
-				version = 6.6.0;
+				version = 6.7.1;
 			};
 		};
 		4B9BC42824EB2E6D000209B5 /* XCRemoteSwiftPackageReference "ShortcutRecorder" */ = {
@@ -1393,7 +1393,7 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
 				kind = exactVersion;
-				version = 2.6.0;
+				version = 2.6.3;
 			};
 		};
 		4BADD55C283ABD0200C6B16D /* XCRemoteSwiftPackageReference "swift-collections" */ = {
@@ -1401,7 +1401,7 @@
 			repositoryURL = "https://github.com/apple/swift-collections.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.0;
+				minimumVersion = 1.1.1;
 			};
 		};
 		4BD5655124E8014100D52809 /* XCRemoteSwiftPackageReference "swifter" */ = {

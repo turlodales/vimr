@@ -176,9 +176,9 @@ final class MainWindow: NSObject,
 
     self.usesTheme = state.appearance.usesTheme
 
-    state.orderedTools.forEach { toolId in
+    for toolId in state.orderedTools {
       guard let tool = tools[toolId] else {
-        return
+        continue
       }
 
       self.workspace.append(
@@ -187,7 +187,7 @@ final class MainWindow: NSObject,
       )
     }
 
-    self.tools.forEach { toolId, toolContainer in
+    for (toolId, toolContainer) in self.tools {
       if state.tools[toolId]?.open == true {
         toolContainer.toggle()
       }
@@ -207,7 +207,6 @@ final class MainWindow: NSObject,
 
     self.addViews(withTopInset: 0)
 
-    self.neoVimView.usesLiveResize = state.useLiveResize
     self.neoVimView.delegate = self
     self.updateNeoVimAppearance()
 
@@ -428,10 +427,6 @@ final class MainWindow: NSObject,
         self.neoVimView.isLeftOptionMeta = state.isLeftOptionMeta
         self.neoVimView.isRightOptionMeta = state.isRightOptionMeta
 
-        if self.neoVimView.usesLiveResize != state.useLiveResize {
-          self.neoVimView.usesLiveResize = state.useLiveResize
-        }
-
         if self.defaultFont != state.appearance.font
           || self.linespacing != state.appearance.linespacing
           || self.characterspacing != state.appearance.characterspacing
@@ -475,16 +470,16 @@ final class MainWindow: NSObject,
   private func set(tabsThemeWith _: Theme) {
     var tabsTheme = Tabs.Theme.default
 
-    tabsTheme.foregroundColor = self.theme.foreground
-    tabsTheme.backgroundColor = self.theme.background
+    tabsTheme.foregroundColor = self.theme.tabForeground
+    tabsTheme.backgroundColor = self.theme.tabBackground
 
     tabsTheme.separatorColor = self.theme.background.brightening(by: 0.75)
 
-    tabsTheme.selectedForegroundColor = self.theme.highlightForeground
-    tabsTheme.selectedBackgroundColor = self.theme.highlightBackground
-		
-		tabsTheme.tabBackgroundColor = self.theme.tabBackground;
-		tabsTheme.tabForegroundColor = self.theme.tabForeground;
+    tabsTheme.tabBarBackgroundColor = self.theme.tabBarBackground
+    tabsTheme.tabBarForegroundColor = self.theme.tabBarForeground
+
+    tabsTheme.selectedForegroundColor = self.theme.selectedTabForeground
+    tabsTheme.selectedBackgroundColor = self.theme.selectedTabBackground
 
     tabsTheme.tabSelectedIndicatorColor = self.theme.highlightForeground
 
