@@ -70,7 +70,7 @@ final class AttributesRunDrawer {
 
     context.setFillColor(ColorUtils.cgColorIgnoringAlpha(run.attrs.effectiveForeground))
 
-    fontGlyphRuns.forEach { run in
+    for run in fontGlyphRuns {
       CTFontDrawGlyphs(run.font, run.glyphs, run.positions, run.glyphs.count, context)
     }
 
@@ -162,7 +162,7 @@ final class AttributesRunDrawer {
 
     if self.usesLigatures {
       return self.typesetter.fontGlyphRunsWithLigatures(
-        nvimUtf16Cells: attrsRun.cells.map { Array($0.string.utf16) },
+        nvimUtf16Cells: attrsRun.cells.map(\.utf16chars),
         startColumn: attrsRun.cells.startIndex,
         offset: CGPoint(x: offset.x, y: attrsRun.location.y + self.baselineOffset),
         font: font,
@@ -170,7 +170,7 @@ final class AttributesRunDrawer {
       )
     } else {
       return self.typesetter.fontGlyphRunsWithoutLigatures(
-        nvimUtf16Cells: attrsRun.cells.map { Array($0.string.utf16) },
+        nvimUtf16Cells: attrsRun.cells.map(\.utf16chars),
         startColumn: attrsRun.cells.startIndex,
         offset: CGPoint(x: offset.x, y: attrsRun.location.y + self.baselineOffset),
         font: font,
@@ -189,7 +189,7 @@ final class AttributesRunDrawer {
     self.descent = CTFontGetDescent(self.font)
     self.underlinePosition = CTFontGetUnderlinePosition(self.font)
     self.underlineThickness = CTFontGetUnderlineThickness(self.font)
-    
+
     self.typesetter.clearCache()
   }
 }

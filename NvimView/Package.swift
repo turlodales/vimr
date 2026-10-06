@@ -1,39 +1,39 @@
-// swift-tools-version:5.9
+// swift-tools-version: 6.0
 
 import PackageDescription
 
 let package = Package(
   name: "NvimView",
-  platforms: [.macOS(.v12)],
+  platforms: [.macOS(.v14)],
   products: [
     .library(name: "NvimView", targets: ["NvimView"]),
   ],
   dependencies: [
-    .package(name: "RxPack", path: "../RxPack"),
-    .package(url: "https://github.com/a2/MessagePack.swift", from: "4.0.0"),
-    .package(url: "https://github.com/ReactiveX/RxSwift", from: "6.6.0"),
-    .package(url: "https://github.com/Quick/Nimble", from: "13.3.0"),
+    .package(url: "https://github.com/Quick/Nimble", from: "14.0.0"),
+    .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", .upToNextMajor(from: "0.62.2")),
     .package(name: "Commons", path: "../Commons"),
     .package(name: "Tabs", path: "../Tabs"),
+    .package(name: "NvimApi", path: "../NvimApi"),
   ],
   targets: [
     .target(
       name: "NvimView",
       dependencies: [
-        .product(name: "RxSwift", package: "RxSwift"),
-        .product(name: "RxPack", package: "RxPack"),
         "Tabs",
-        .product(name: "RxNeovim", package: "RxPack"),
-        .product(name: "MessagePack", package: "MessagePack.swift"),
         "Commons",
+        "NvimApi",
       ],
       // com.qvacua.NvimView.vim is copied by the build NvimServer script.
       exclude: ["Resources/com.qvacua.NvimView.vim"],
       resources: [
         .copy("Resources/runtime"),
         .copy("Resources/NvimServer"),
-      ]
+      ],
+      plugins: [.plugin(name: "SwiftLintBuildToolPlugin", package: "SwiftLintPlugins")]
     ),
-    .testTarget(name: "NvimViewTests", dependencies: ["NvimView", "Nimble"]),
+    .testTarget(
+      name: "NvimViewTests",
+      dependencies: ["NvimView", "Nimble"]
+    ),
   ]
 )

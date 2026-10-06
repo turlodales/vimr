@@ -1,5 +1,195 @@
 # Next
 
+* GH-1170: Fix MsgpackRpc error handler. Thanks @lukeasrodgers for the PR!
+
+# 0.66.0-20260827.194249
+
+* Neovim 0.12.5 😀
+* GH-1168: Add "New Window" Dock menu. Thanks @jessie-murray for the PR!
+
+# v0.65.0-20260706.084223
+
+* Neovim 0.12.4 😀
+* Dependencides updates:
+  - sparkle-project/Sparkle@2.9.3
+
+# 0.64.0-20260615.163555
+
+* Neovim 0.12.3 😀
+
+# v0.63.0-20260425.152925
+
+* GH-1161: Connect to a remote Neovim instance via TCP or Unix domain socket. Thanks @georgeharker for the PR!
+* GH-1162: Fix window close / quit safety races. Thanks @georgeharker for the PR!
+* Neovim 0.12.2 😀
+
+# 0.62.0-20260408.124559
+
+* Neovim 0.12.1 😀
+* Dependencides updates:
+  - sparkle-project/Sparkle@2.9.1
+  - SimplyDanny/SwiftLintPlugins@0.63.2
+  - qvacua/MessagePack.swift@5.0.0
+  - Moved from Kitura/BlueSocket@2.0.2 to qvacua/BlueSocket@2.1.0
+
+# 0.61.1-20260402.202245
+
+* Improve tab rendering performance, #1152. Thanks @lukeasrodgers for the PR!
+* Optimize session loading performance by debouncing heavy UI updates, #1142. Thanks @rainux for the PR!
+* Inherit base colors from the active Neovim theme, #1150. Thanks @oddish3 for the PR!
+
+# 0.61.0-20260401.174810
+
+* Neovim 0.12.0 😀
+* Bugfix: Ensure window title stays in sync with current buffer: #1154. Thanks @rainux for the PR!
+
+# 0.60.0-20260129.185351
+
+* Neovim 0.11.6 😀
+* Dependencides updates:
+    - sparkle-project/Sparkle@2.8.1
+    - Quick/Nimble@14.0.0
+    - SimplyDanny/SwiftLintPlugins@0.62.2
+    - apple/swift-collections@1.3.0
+
+# 0.59.3-20251222.155246
+
+* GH-1141: Fix Cmd+Shift+W closing only the current tab instead of the window. Thanks @rainux for the PR!
+* GH-1144: Persist cleared shortcuts instead of restoring defaults. Thanks @rainux for the PR!
+
+# 0.59.2-20251201.200738
+
+* Slight performance improvement.
+
+# 0.59.1-20251127.190300 
+
+* Slight performance improvement.
+* Minimum macOS bumped to macOS 14.
+
+# 0.59.0-20251103.194245
+
+* Neovim 0.11.5 😀
+
+# 0.58.0-20251013.211150
+
+* Add option to set the default `NVIM_APPNAME` and to open new window with custom `NVIM_APPNAME` (⌘⇧N)
+
+# 0.57.3-20251011.181129
+
+* Slight performance improvement.
+* Dependencies updates:
+    - Quick/Nimble@13.8.0
+    - sparkle-project/Sparkle@2.8.0
+
+# 0.57.2-20251005.154642 
+
+* Slight performance improvement.
+
+# 0.57.1-20250921.204618
+
+* Slight performance improvement.
+
+# 0.57.0-20250901.212156
+
+* Neovim 0.11.4 😀
+* Dependencies updates:
+    - apple/swift-collections@1.2.1
+    - sparkle-project/Sparkle@2.7.1
+
+# 0.56.1-20250725.172504 
+
+* Fix universal build issue
+* GH-1117: Bug fix re. IME; Thanks @wmil for the PR!
+
+# v0.56.0-20250723.181258
+
+* Migration to Swift 6: Use Swift's `async/await` instead of RxSwift.
+* ⚠️ Complex input methods, e.g., CJK input, are not working correctly since some time.
+
+# v0.55.0-20250713.101600
+
+* Neovim 0.11.3 😀
+
+# 0.54.0-20250531.222551
+
+* Neovim 0.11.2 😀
+
+# 0.53.0-20250430.152427
+
+* Neovim 0.11.1 😀
+
+# 0.52.0-20250401.183326
+
+* Neovim 0.11.0 😀
+* Dependencies updates:
+  - ReactiveX/RxSwift@6.9.0
+  - sparkle-project/Sparkle@2.7.0
+
+# 0.51.1-20250215.143933 
+
+* GH-1095: Fix: option as meta when control and command are pressed; Thanks @gaelph for the PR!
+
+# 0.51.0-20250129.234141
+
+* Neovim 0.10.4 😀
+
+# 0.50.0-20241224.155723
+
+* Neovim 0.10.3 😀
+* Dependencies updates:
+  - qvacua/MessagePack.swift@4.1.0
+  - ReactiveX/RxSwift@6.8.0
+
+# 0.49.0-20241006.202133
+
+* Neovim 0.10.2 😀
+
+# 0.48.1-20240928.193147
+
+* Bugfix: `lcd/cwd` fix.
+* Dependencies updates:
+  - sparkle-project/Sparkle@2.7.4
+  - Quick/Nimble@13.4.0
+  - apple/swift-collections@1.1.2
+
+# 0.48.0-20240727.082947
+
+* Neovim 0.10.1 😀
+
+# 0.47.5-20240630.155444
+
+* GH-1078: Fix lcd/tcd. Thanks @shanesmith for the PR!
+
+# 0.47.4-20240626.190016
+
+* GH-1075: Fix "E1502: Lua failed to grow stack to 4001". Thanks @shanesmith for the PR!
+* Dependencies updates:
+  - sparkle-project/Sparkle@2.7.3
+  - apple/swift-collections@1.1.1
+
+# v0.47.3-20240616.090032
+
+* GH-1072: Match the tab colors 1:1 with Neovim's `colorscheme`; thanks @s-daveb for the PR!
+* GH-1073: Scroll the window content instead of moving the cursor; thanks @shanesmith for the PR!
+
+# v0.47.2-20240531.221846
+
+* Always use live resizing
+* Dependencies updates:
+  - sparkle-project/Sparkle@2.7.2
+  - ReactiveX/RxSwift@6.7.1
+
+# v0.47.1-20240528.171603
+
+* Neovim 0.10.0 😀
+  - 0.47.0 did not contain the generated API methods for Neovim 0.10.0...
+
+# v0.47.0-20240528.165939
+
+* Neovim 0.10.0 😀
+
+# v0.46.2-20240517.102525
+
 * GH-1059: Improved coloring of custom tabs; thanks @s-daveb for the PR!
 
 # v0.46.1-20240426.143700

@@ -6,7 +6,6 @@
 import Cocoa
 import Commons
 import MessagePack
-import RxSwift
 import Workspace
 
 // MARK: - RpcEvent Actions
@@ -87,6 +86,32 @@ extension MainWindow {
       guard let characterspacing = params[0].doubleValue else { return }
 
       self.emit(self.uuidAction(for: .setCharacterspacing(characterspacing)))
+
+    case .openNewWindow:
+      guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
+      let config = AppDelegate.OpenConfig(
+        urls: [],
+        cwd: self.neoVimView.cwd,
+        cliPipePath: nil,
+        nvimArgs: nil,
+        additionalEnvs: [:]
+      )
+      appDelegate.openNewMainWindow(config: config)
+
+    case .connectToRemote:
+      guard params.count == 1, let address = params[0].stringValue else { return }
+      let trimmedAddress = address.trimmingCharacters(in: .whitespaces)
+      guard !trimmedAddress.isEmpty else { return }
+      guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
+      let config = AppDelegate.OpenConfig(
+        urls: [],
+        cwd: self.neoVimView.cwd,
+        cliPipePath: nil,
+        nvimArgs: nil,
+        additionalEnvs: [:],
+        remoteSocketPath: trimmedAddress
+      )
+      appDelegate.openNewMainWindow(config: config)
     }
   }
 
@@ -127,10 +152,7 @@ extension MainWindow {
 
 extension MainWindow {
   @IBAction func newTab(_: Any?) {
-    self.neoVimView
-      .newTab()
-      .subscribe()
-      .disposed(by: self.disposeBag)
+    Task { await self.neoVimView.newTab() }
   }
 
   @IBAction func openDocument(_: Any?) {
@@ -138,25 +160,20 @@ extension MainWindow {
     panel.canChooseDirectories = true
     panel.allowsMultipleSelection = true
     panel.beginSheetModal(for: self.window) { result in
-      guard result == .OK else {
-        return
-      }
+      Task {
+        guard result == .OK else { return }
 
-      let urls = panel.urls
-      self.neoVimView
-        .allBuffers()
-        .flatMapCompletable { bufs -> Completable in
-          if bufs.count == 1 {
-            let isTransient = bufs.first?.isTransient ?? false
+        let urls = panel.urls
+        let bufs = await self.neoVimView.allBuffers() ?? []
+        if bufs.count == 1 {
+          let isTransient = bufs.first?.isTransient ?? false
 
-            if isTransient {
-              self.neoVimView.cwd = FileUtils.commonParent(of: urls)
-            }
+          if isTransient {
+            self.neoVimView.cwd = FileUtils.commonParent(of: urls)
           }
-          return self.neoVimView.open(urls: urls)
         }
-        .subscribe()
-        .disposed(by: self.disposeBag)
+        await self.neoVimView.open(urls: urls)
+      }
     }
   }
 
@@ -165,48 +182,37 @@ extension MainWindow {
   }
 
   @IBAction func closeWindow(_: Any?) {
-    self.closeWindow = true
     self.window.performClose(nil)
   }
 
   @IBAction func saveDocument(_: Any?) {
-    self.neoVimView
-      .currentBuffer()
-      .observe(on: MainScheduler.instance)
-      .flatMapCompletable { curBuf -> Completable in
-        if curBuf.url == nil {
-          self.savePanelSheet {
-            self.neoVimView
-              .saveCurrentTab(url: $0)
-              .subscribe()
-              .disposed(by: self.disposeBag)
-          }
-          return Completable.empty()
-        }
-
-        return self.neoVimView.saveCurrentTab()
+    Task {
+      guard let curBuf = await self.neoVimView.currentBuffer() else {
+        return
       }
-      .subscribe()
-      .disposed(by: self.disposeBag)
+
+      if curBuf.url == nil {
+        self.savePanelSheet { url in
+          Task { await self.neoVimView.saveCurrentTab(url: url) }
+        }
+      } else {
+        await self.neoVimView.saveCurrentTab()
+      }
+    }
   }
 
   @IBAction func saveDocumentAs(_: Any?) {
-    self.neoVimView
-      .currentBuffer()
-      .observe(on: MainScheduler.instance)
-      .subscribe(onSuccess: { curBuf in
-        self.savePanelSheet { url in
-          self.neoVimView
-            .saveCurrentTab(url: url)
-            .andThen(
-              curBuf.isDirty ? self.neoVimView.openInNewTab(urls: [url]) : self.neoVimView
-                .openInCurrentTab(url: url)
-            )
-            .subscribe()
-            .disposed(by: self.disposeBag)
+    Task {
+      guard let curBuf = await self.neoVimView.currentBuffer() else { return }
+
+      self.savePanelSheet { url in
+        Task {
+          await self.neoVimView.saveCurrentTab(url: url)
+          curBuf.isDirty ? await self.neoVimView.openInNewTab(urls: [url]) : await self.neoVimView
+            .openInCurrentTab(url: url)
         }
-      })
-      .disposed(by: self.disposeBag)
+      }
+    }
   }
 
   private func savePanelSheet(action: @escaping (URL) -> Void) {
@@ -298,7 +304,7 @@ extension MainWindow {
 
 extension MainWindow {
   func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-    let canSave = self.neoVimView.currentBuffer().syncValue()?.type == ""
+    let canSave = self.neoVimView.currentBufferSync()?.type == ""
     let canSaveAs = canSave
     let canOpen = canSave
     let canOpenQuickly = canSave

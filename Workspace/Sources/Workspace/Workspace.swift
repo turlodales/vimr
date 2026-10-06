@@ -6,13 +6,14 @@
 import Cocoa
 import PureLayout
 
-public enum WorkspaceBarLocation: String, Codable, CaseIterable {
+public enum WorkspaceBarLocation: String, Codable, CaseIterable, Sendable {
   case top
   case right
   case bottom
   case left
 }
 
+@MainActor
 public protocol WorkspaceDelegate: AnyObject {
   func resizeWillStart(workspace: Workspace, tool: WorkspaceTool?)
   func resizeDidEnd(workspace: Workspace, tool: WorkspaceTool?)
@@ -30,7 +31,7 @@ public final class Workspace: NSView, WorkspaceBarDelegate {
     public init(mainViewMinimumSize: CGSize) { self.mainViewMinimumSize = mainViewMinimumSize }
   }
 
-  public struct Theme {
+  public struct Theme: Sendable {
     public static let `default` = Workspace.Theme()
 
     public var foreground = NSColor.black
@@ -59,7 +60,7 @@ public final class Workspace: NSView, WorkspaceBarDelegate {
   }
 
   public var orderedTools: [WorkspaceTool] {
-    self.bars.values.reduce([]) { [$0, $1.tools].flatMap { $0 } }
+    self.bars.values.reduce([]) { [$0, $1.tools].flatMap(\.self) }
   }
 
   public let mainView: NSView
@@ -85,13 +86,13 @@ public final class Workspace: NSView, WorkspaceBarDelegate {
       .left: WorkspaceBar(location: .left),
     ]
 
-    super.init(frame: .zero)
+    super.init(frame: .init(x: 0, y: 0, width: 640, height: 480))
     self.configureForAutoLayout()
 
     self.registerForDraggedTypes([NSPasteboard.PasteboardType(WorkspaceToolButton.toolUti)])
-    self.bars.values.forEach {
-      $0.workspace = self
-      $0.delegate = self
+    for value in self.bars.values {
+      value.workspace = self
+      value.delegate = self
     }
 
     self.relayout()
@@ -213,13 +214,7 @@ public extension Workspace {
   }
 
   private func barLocation(inPoint loc: CGPoint) -> WorkspaceBarLocation? {
-    for barLoc in WorkspaceBarLocation.allCases {
-      if self.rect(forBar: barLoc).contains(loc) {
-        return barLoc
-      }
-    }
-
-    return nil
+    return WorkspaceBarLocation.allCases.first(where: { self.rect(forBar: $0).contains(loc) })
   }
 
   // We copy and pasted WorkspaceBar.barFrame() since we need the rect for the proxy bars.

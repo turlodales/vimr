@@ -11,10 +11,14 @@ struct UUpdate: Codable {
   var attrId: Int?
   var repeats: Int?
 
+  var utf16chars: [Unicode.UTF16.CodeUnit]
+
   init(string: String, attrId: Int? = nil, repeats: Int? = nil) {
     self.string = string
     self.attrId = attrId
     self.repeats = repeats
+
+    self.utf16chars = Array(string.utf16)
   }
 }
 
@@ -22,11 +26,19 @@ struct UCell: Codable {
   var string: String
   var attrId: Int
 
+  // When computing FontGlueRun, we have to convert the UCell.string to array of UTF16 chars.
+  // The conversion takes almost half of AttributesRunDrawer.fontGlyphRuns().
+  // So, we cache it in the cell to compute it only once when scrolling.
+  var utf16chars: [Unicode.UTF16.CodeUnit]
+
   var flatCharIndex: Int
 
   init(string: String, attrId: Int, flatCharIndex: Int = 0) {
     self.string = string
     self.attrId = attrId
+
+    self.utf16chars = Array(string.utf16)
+
     self.flatCharIndex = flatCharIndex
   }
 }
@@ -103,10 +115,9 @@ final class UGrid: CustomStringConvertible, Codable {
 
     if row[column].string == wordSeparator { return column }
 
-    for i in (0..<column).reversed() {
-      if row[i].string == wordSeparator { return min(i + 1, self.size.width - 1) }
+    if let i = (0..<column).reversed().first(where: { row[$0].string == wordSeparator }) {
+      return min(i + 1, self.size.width - 1)
     }
-
     return 0
   }
 
@@ -118,8 +129,8 @@ final class UGrid: CustomStringConvertible, Codable {
 
     if column + 1 == self.size.width { return column }
 
-    for i in (column + 1)..<self.size.width {
-      if row[i].string == wordSeparator { return max(i - 1, 0) }
+    if let i = ((column + 1)..<self.size.width).first(where: { row[$0].string == wordSeparator }) {
+      return max(i - 1, 0)
     }
 
     return self.size.width - 1
@@ -215,7 +226,7 @@ final class UGrid: CustomStringConvertible, Codable {
   }
 
   func resize(_ size: Size) {
-    self.log.debug(size)
+    dlog.debug(size)
 
     self.size = size
     self.cursorPosition = .zero
@@ -246,8 +257,10 @@ final class UGrid: CustomStringConvertible, Codable {
       }
     }
     for column in startCol..<endCol {
-      self.cells[row][column].string = chunk[column - startCol]
-      self.cells[row][column].attrId = attrIds[column - startCol]
+      let idx = column - startCol
+      self.cells[row][column].string = chunk[idx]
+      self.cells[row][column].utf16chars = Array(chunk[idx].utf16)
+      self.cells[row][column].attrId = attrIds[idx]
     }
 
     if clearCol > endCol {
@@ -284,6 +297,7 @@ final class UGrid: CustomStringConvertible, Codable {
       let reps = chunk[cindex].repeats ?? 1
       for _ in 0..<reps {
         self.cells[row][column].string = chunk[cindex].string
+        self.cells[row][column].utf16chars = chunk[cindex].utf16chars
         let attrId = chunk[cindex].attrId
         if attrId != nil {
           lastAttrId = attrId!
@@ -370,7 +384,7 @@ final class UGrid: CustomStringConvertible, Codable {
   }
 
   func recomputeFlatIndices(rowStart: Int) {
-    self.log.debug("Recomputing flat indices from row \(rowStart)")
+    dlog.debug("Recomputing flat indices from row \(rowStart)")
 
     var counter = 0
     if rowStart > 0 {
@@ -387,18 +401,16 @@ final class UGrid: CustomStringConvertible, Codable {
       }
     }
   }
-
-  private let log = OSLog(subsystem: Defs.loggerSubsystem, category: Defs.LoggerCategory.view)
 }
 
 extension UGrid {
-  func dump() throws {
+  func dumpToJson() throws {
     #if DEBUG
-      let encoder = JSONEncoder()
-      encoder.outputFormatting = .prettyPrinted
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .prettyPrinted
 
-      let data = try encoder.encode(self)
-      try data.write(to: URL(fileURLWithPath: "/tmp/ugrid.dump.json"))
+    let data = try encoder.encode(self)
+    try data.write(to: URL(fileURLWithPath: "/tmp/ugrid.dump.json"))
     #endif
   }
 }

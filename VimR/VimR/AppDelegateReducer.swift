@@ -13,10 +13,12 @@ final class AppDelegateReducer: ReducerType {
     self.baseServerUrl = baseServerUrl
   }
 
-  func typedReduce(_ pair: ReduceTuple) -> ReduceTuple {
-    var state = pair.state
+  func typedReduce(_ tuple: ReduceTuple<StateType, ActionType>)
+    -> ReduceTuple<StateType, ActionType>
+  {
+    var state = tuple.state
 
-    switch pair.action {
+    switch tuple.action {
     case let .newMainWindow(config):
       let mainWindow = self.newMainWindow(with: state, config: config)
       state.mainWindows[mainWindow.uuid] = mainWindow
@@ -38,14 +40,15 @@ final class AppDelegateReducer: ReducerType {
       state.preferencesOpen = Marked(true)
     }
 
-    return (state, pair.action, true)
+    return ReduceTuple(state: state, action: tuple.action, modified: true)
   }
 
   private let baseServerUrl: URL
 
-  private func newMainWindow(with state: AppState, config: AppDelegate.OpenConfig) -> MainWindow
-    .State
-  {
+  private func newMainWindow(
+    with state: AppState,
+    config: AppDelegate.OpenConfig
+  ) -> MainWindow.State {
     var mainWindow = state.mainWindowTemplate
 
     mainWindow.uuid = UUID()
@@ -63,13 +66,17 @@ final class AppDelegateReducer: ReducerType {
     mainWindow.usesVcsIgnores = state.openQuickly.defaultUsesVcsIgnores
     mainWindow.nvimArgs = config.nvimArgs
     mainWindow.cliPipePath = config.cliPipePath
-    mainWindow.envDict = config.envDict
+    mainWindow.additionalEnvs = config.additionalEnvs
+    if !state.nvimAppName.isEmpty {
+      mainWindow.additionalEnvs["NVIM_APPNAME"] = state.nvimAppName
+    }
     mainWindow.urlsToOpen = config.urls.toDict { _ in MainWindow.OpenMode.default }
     mainWindow.frame = state.mainWindows.isEmpty ? state.mainWindowTemplate.frame
       : self.frame(relativeTo: state.mainWindowTemplate.frame)
     if let line = config.line {
       mainWindow.goToLineFromCli = Marked(line)
     }
+    mainWindow.remoteSocketPath = config.remoteSocketPath
 
     return mainWindow
   }

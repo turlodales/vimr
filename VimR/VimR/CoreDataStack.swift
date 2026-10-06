@@ -26,7 +26,6 @@ final class CoreDataStack {
   let container: NSPersistentContainer
   let storeFile: URL
   var storeLocation: URL { self.storeFile.parent }
-  var deleteOnDeinit: Bool
 
   func newBackgroundContext() -> NSManagedObjectContext {
     let context = self.container.newBackgroundContext()
@@ -35,8 +34,7 @@ final class CoreDataStack {
     return context
   }
 
-  init(modelName: String, storeLocation: StoreLocation, deleteOnDeinit: Bool = false) throws {
-    self.deleteOnDeinit = deleteOnDeinit
+  init(modelName: String, storeLocation: StoreLocation) throws {
     self.container = NSPersistentContainer(name: modelName)
 
     let fileManager = FileManager.default
@@ -70,7 +68,7 @@ final class CoreDataStack {
     self.container.persistentStoreDescriptions = [NSPersistentStoreDescription(url: url)]
     self.storeFile = url
 
-    self.log.info("Created Core Data store in \(self.storeLocation)")
+    dlog.debug("Created Core Data store in \(self.storeLocation)")
 
     let condition = ConditionVariable()
     var error: Swift.Error?
@@ -86,7 +84,6 @@ final class CoreDataStack {
   }
 
   func deleteStore() throws {
-    guard self.deleteOnDeinit else { return }
     guard let store = self.container.persistentStoreCoordinator.persistentStore(
       for: self.storeFile
     ) else { return }
@@ -98,17 +95,10 @@ final class CoreDataStack {
     guard fileManager.fileExists(atPath: parentFolder.path) else { return }
 
     try fileManager.removeItem(at: parentFolder)
-    self.log.info("Deleted store at \(self.storeLocation)")
+    dlog.debug("Deleted store at \(self.storeLocation)")
   }
 
   deinit {
-    guard self.deleteOnDeinit else { return }
-    do {
-      try self.deleteStore()
-    } catch {
-      self.log.error("Could not delete store at \(self.storeLocation): \(error)")
-    }
+    try? self.deleteStore()
   }
-
-  private let log = OSLog(subsystem: Defs.loggerSubsystem, category: Defs.LoggerCategory.service)
 }

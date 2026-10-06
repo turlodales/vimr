@@ -5,13 +5,13 @@
 
 import Cocoa
 import PureLayout
-import RxSwift
-import ShortcutRecorder
+@preconcurrency import ShortcutRecorder
 
 final class ShortcutValueTransformer: ValueTransformer {
-  static let shared = ShortcutValueTransformer()
+  // Should be fine to be nonisolated
+  nonisolated(unsafe) static let shared = ShortcutValueTransformer()
 
-  override class func allowsReverseTransformation() -> Bool { true }
+  override static func allowsReverseTransformation() -> Bool { true }
 
   /// Data to Shortcut
   override func transformedValue(_ value: Any?) -> Any? {
@@ -21,7 +21,10 @@ final class ShortcutValueTransformer: ValueTransformer {
 
   /// Shortcut to Data
   override func reverseTransformedValue(_ value: Any?) -> Any? {
-    guard let value, let shortcut = value as? Shortcut else { return nil }
+    // When the user clears a shortcut, the value is nil.
+    // We want to store an empty shortcut instead of removing the key from UserDefaults
+    // so that the default value is not restored on the next launch.
+    let shortcut = (value as? Shortcut) ?? Shortcut(keyEquivalent: "")
     return try? NSKeyedArchiver.archivedData(withRootObject: shortcut, requiringSecureCoding: true)
   }
 }
@@ -29,9 +32,12 @@ final class ShortcutValueTransformer: ValueTransformer {
 final class ShortcutsPref: PrefPane,
   UiComponent,
   NSOutlineViewDelegate,
-  RecorderControlDelegate
+  @preconcurrency RecorderControlDelegate
 {
   typealias StateType = AppState
+  typealias ActionType = Sendable
+
+  let uuid = UUID()
 
   @objc dynamic var content = [ShortcutItem]()
 
@@ -43,7 +49,7 @@ final class ShortcutsPref: PrefPane,
     didSet { self.updateShortcutService() }
   }
 
-  required init(source _: Observable<StateType>, emitter _: ActionEmitter, state _: StateType) {
+  required init(context _: ReduxContext, state _: StateType) {
     // We know that the identifier is not empty.
     let shortcutSuiteName = Bundle.main.bundleIdentifier! + ".menuitems"
     self.shortcutsUserDefaults = UserDefaults(suiteName: shortcutSuiteName)
@@ -103,7 +109,7 @@ final class ShortcutsPref: PrefPane,
       return
     }
 
-    legacyDefaultShortcuts.forEach { id in
+    for id in legacyDefaultShortcuts {
       let shortcut: Shortcut? = if let dict = self.shortcutsUserDefaults?
         .value(forKey: id) as? [String: Any]
       {
@@ -121,11 +127,9 @@ final class ShortcutsPref: PrefPane,
 
   private func initShortcutUserDefaults() {
     let transformer = ShortcutValueTransformer.shared
-    defaultShortcuts.forEach { id, shortcut in
-      if self.shortcutsUserDefaults?.value(forKey: id) == nil {
-        let shortcutData = transformer.reverseTransformedValue(shortcut) as? NSData
-        self.shortcutsUserDefaults?.set(shortcutData, forKey: id)
-      }
+    for (id, shortcut) in defaultShortcuts where self.shortcutsUserDefaults?.value(forKey: id) == nil {
+      let shortcutData = transformer.reverseTransformedValue(shortcut) as? NSData
+      self.shortcutsUserDefaults?.set(shortcutData, forKey: id)
     }
     self.shortcutsUserDefaults?.set(defaultsVersion, forKey: defaultsVersionKey)
   }

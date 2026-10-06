@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 
 readonly branch=${branch:?"which branch to use"}
-readonly create_gh_release=${create_gh_release:?"create Github release?"}
-readonly upload=${upload:?"upload artifact to github release?"}
-readonly update_appcast=${update_appcast:?"update and push appcast?"}
+declare -r -x create_gh_release=${create_gh_release:?"create Github release?"}
+declare -r -x upload=${upload:?"upload artifact to github release?"}
+declare -r -x update_appcast=${update_appcast:?"update and push appcast?"}
 
 # release.spec.sh will declare these two variables
 release_notes=${release_notes:?"release notes"}
@@ -38,7 +38,6 @@ main() {
   echo "### Store release notes"
   echo "${release_notes}" > release-notes.temp.md
 
-  # commit and push the tag
   # get the marketing version to be used as tag
   source release.spec.sh
 
@@ -48,19 +47,26 @@ main() {
     tag_name="${marketing_version}-${bundle_version}"
   fi
   echo "### Using ${tag_name} as tag name"
+
+  echo "### Build VimR"
+
+  is_jenkins=true release_spec_file=release.spec.sh ./bin/build_release.sh
+
+  echo "### Commit and push the tag"
   git commit -am "Bump version to ${tag_name}"
   git tag -a "${tag_name}" -m "${tag_name}"
   git push
   git push origin "${tag_name}"
 
-  echo "### Build VimR"
-
-  release_spec_file=release.spec.sh ./bin/build_release.sh
-
   if [[ "${create_gh_release}" == false ]]; then
     echo "### No github release, so exiting after building"
     exit 0
   fi
+
+  echo "### Publish VimR to GitHub"
+
+  release_spec_file=release.spec.sh \
+  ./bin/publish_release.sh
 
   echo "### Commit appcast"
   if [[ "${update_appcast}" == true ]]; then

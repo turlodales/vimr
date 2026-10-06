@@ -4,23 +4,17 @@
  */
 
 import Commons
-import CoreData
+@preconcurrency import CoreData
 import Foundation
 import Ignore
 import Misc
 import os
 
-final class FuzzySearchService {
-  typealias ScoredUrlsCallback = ([ScoredUrl]) -> Void
+extension ScoredUrl: @unchecked Sendable {}
+extension FileItem: @unchecked Sendable {}
 
-  var root: URL {
-    didSet {
-      self.queue.sync {
-        self.deleteAllFiles()
-        self.ensureRootFileInStore()
-      }
-    }
-  }
+final class FuzzySearchService: @unchecked Sendable {
+  typealias ScoredUrlsCallback = @Sendable ([ScoredUrl]) -> Void
 
   var usesVcsIgnores = true {
     willSet { self.stopScanScore() }
@@ -33,11 +27,7 @@ final class FuzzySearchService {
   }
 
   func cleanUp() {
-    do {
-      try self.coreDataStack.deleteStore()
-    } catch {
-      self.log.error("Could not delete core data store: \(error)")
-    }
+    try? self.coreDataStack.deleteStore()
   }
 
   func stopScanScore() {
@@ -49,12 +39,12 @@ final class FuzzySearchService {
 
   func scanScore(
     for pattern: String,
-    beginCallback: @escaping () -> Void,
-    endCallback: @escaping () -> Void,
-    callback: @escaping ScoredUrlsCallback
+    beginCallback: @Sendable @escaping () -> Void,
+    endCallback: @Sendable @escaping () -> Void,
+    callback: @Sendable @escaping ([ScoredUrl]) -> Void
   ) {
     self.queue.async {
-      self.log.info("Starting fuzzy search for \(pattern) in \(self.root)")
+      dlog.debug("Starting fuzzy search for \(pattern) in \(self.root)")
       beginCallback()
       defer { endCallback() }
 
@@ -73,7 +63,7 @@ final class FuzzySearchService {
         self.scanScoreFilesNeedScanning(matcher: matcher, context: ctx, callback: callback)
       }
 
-      self.log.info("Finished fuzzy search for \(pattern) in \(self.root)")
+      dlog.debug("Finished fuzzy search for \(pattern) in \(self.root)")
     }
   }
 
@@ -88,10 +78,10 @@ final class FuzzySearchService {
     countReq.predicate = predicate
     countReq.includesSubentities = false
     guard let count = try? context.count(for: countReq) else {
-      self.log.error("Could not get count of Files")
+      self.logger.error("Could not get count of Files")
       return
     }
-    self.log.info("Scoring \(count) Files for pattern \(matcher.needle)")
+    dlog.debug("Scoring \(count) Files for pattern \(matcher.needle)")
 
     let urlSorter = NSSortDescriptor(key: "url", ascending: true)
     let fetchReq = FileItem.fetchRequest()
@@ -112,7 +102,7 @@ final class FuzzySearchService {
           callback: callback
         )
       } catch {
-        self.log.error("Could not fetch \(fetchReq): \(error)")
+        self.logger.error("Could not fetch \(fetchReq): \(error)")
       }
 
       context.reset()
@@ -122,14 +112,14 @@ final class FuzzySearchService {
   private func scanScoreFilesNeedScanning(
     matcher: FzyMatcher,
     context: NSManagedObjectContext,
-    callback: ([ScoredUrl]) -> Void
+    callback: ScoredUrlsCallback
   ) {
     let req = self.fileFetchRequest("needsScanChildren == TRUE AND direntType == %d", [DT_DIR])
     do {
       let foldersToScan = try context.fetch(req)
       // We use the ID of objects since we reset in scanScore(), which resets all properties of
       // foldersToScan after first folderToScan.
-      foldersToScan.forEach { folder in
+      for folder in foldersToScan {
         self.scanScore(
           matcher: matcher,
           folderId: folder.objectID,
@@ -138,7 +128,7 @@ final class FuzzySearchService {
         )
       }
     } catch {
-      self.log.error("Could not fetch \(req): \(error)")
+      self.logger.error("Could not fetch \(req): \(error)")
     }
   }
 
@@ -146,13 +136,13 @@ final class FuzzySearchService {
     matcher: FzyMatcher,
     folderId: NSManagedObjectID,
     context: NSManagedObjectContext,
-    callback: ([ScoredUrl]) -> Void
+    callback: ScoredUrlsCallback
   ) {
     var saveCounter = 1
     var counter = 1
 
     guard let folder = context.object(with: folderId) as? FileItem else {
-      self.log.error("Could not convert object with ID \(folderId) to File")
+      self.logger.error("Could not convert object with ID \(folderId) to File")
       return
     }
 
@@ -174,7 +164,7 @@ final class FuzzySearchService {
             guard testIgnores, let ignore = baton else { return true }
 
             let isExcluded = ignore.excludes($0)
-            if isExcluded { self.log.debug("Ignoring \($0.path)") }
+            if isExcluded { dlog.debug("Ignoring \($0.path)") }
             return !isExcluded
           }
 
@@ -193,7 +183,7 @@ final class FuzzySearchService {
         stack.append(contentsOf: zip(childBatons, childFolders))
 
         if saveCounter > coreDataBatchSize {
-          self.log.debug(
+          dlog.debug(
             "Flushing and scoring \(saveCounter) Files, stack has \(stack.count) Files"
           )
           self.scoreAllRegisteredFiles(
@@ -211,24 +201,27 @@ final class FuzzySearchService {
           let ids = stack.map(\.1.objectID)
           stack = Array(zip(
             stack.map(\.0),
-            ids.map { context.object(with: $0) as! FileItem }
+            ids.map {
+              // swiftlint:disable:next force_cast
+              context.object(with: $0) as! FileItem
+            }
           ))
         }
       }
     }
 
-    self.log.debug("Flushing and scoring last \(saveCounter) Files")
+    dlog.debug("Flushing and scoring last \(saveCounter) Files")
     self.scoreAllRegisteredFiles(matcher: matcher, context: context, callback: callback)
     self.saveAndReset(context: context)
 
-    self.log.debug("Stored \(counter) Files")
+    dlog.debug("Stored \(counter) Files")
   }
 
   private func saveAndReset(context: NSManagedObjectContext) {
     do {
       try context.save()
     } catch {
-      self.log.error("There was an error saving the context: \(error)")
+      self.logger.error("There was an error saving the context: \(error)")
     }
     context.reset()
   }
@@ -248,13 +241,13 @@ final class FuzzySearchService {
   private func scoreAllRegisteredFiles(
     matcher: FzyMatcher,
     context: NSManagedObjectContext,
-    callback: ([ScoredUrl]) -> Void
+    callback: ScoredUrlsCallback
   ) {
     let files = context.registeredObjects
       .compactMap { $0 as? FileItem }
       .filter { $0.direntType != DT_DIR }
 
-    self.log.debug("Scoring \(files.count) Files")
+    dlog.debug("Scoring \(files.count) Files")
     self.scoreFiles(matcher: matcher, files: files, callback: callback)
   }
 
@@ -291,8 +284,7 @@ final class FuzzySearchService {
   init(root: URL) throws {
     self.coreDataStack = try CoreDataStack(
       modelName: "FuzzySearch",
-      storeLocation: .temp(UUID().uuidString),
-      deleteOnDeinit: true
+      storeLocation: .temp(UUID().uuidString)
     )
     self.root = root
     self.writeContext = self.coreDataStack.newBackgroundContext()
@@ -314,7 +306,7 @@ final class FuzzySearchService {
           _ = self.file(fromUrl: self.root, in: ctx)
           try ctx.save()
         } catch {
-          self.log.error("Could not ensure root File in Core Data: \(error)")
+          self.logger.error("Could not ensure root File in Core Data: \(error)")
         }
       }
     }
@@ -331,14 +323,16 @@ final class FuzzySearchService {
             return
           }
 
-          for child in folder.children ?? [] { ctx.delete(child) }
+          for child in folder.children ?? [] {
+            ctx.delete(child)
+          }
 
           folder.needsScanChildren = true
-          self.log.trace("Marked \(folder.url!) for scanning")
+          dlog.trace("Marked \(folder.url!) for scanning")
 
           try ctx.save()
         } catch {
-          self.log.error(
+          self.logger.error(
             "Could not fetch File with url \(folderUrl) "
               + "or could not save after setting needsScanChildren: \(error)"
           )
@@ -370,7 +364,7 @@ final class FuzzySearchService {
       do {
         try ctx.execute(delReq)
       } catch {
-        self.log.error("Could not delete all Files: \(error)")
+        self.logger.error("Could not delete all Files: \(error)")
       }
     }
   }
@@ -386,6 +380,8 @@ final class FuzzySearchService {
     return file
   }
 
+  #if DEBUG
+  // swiftlint:disable no_direct_standard_out_logs
   func debug() {
     let req = self.fileFetchRequest("needsScanChildren == TRUE AND direntType == %d", [DT_DIR])
 
@@ -403,6 +399,8 @@ final class FuzzySearchService {
       }
     }
   }
+  // swiftlint:enable no_direct_standard_out_logs
+  #endif
 
   private var stop = false
   private let stopLock = NSLock()
@@ -419,7 +417,12 @@ final class FuzzySearchService {
   private let writeContext: NSManagedObjectContext
   private let ignoreService: IgnoreService
 
-  private let log = OSLog(subsystem: Defs.loggerSubsystem, category: Defs.LoggerCategory.service)
+  private var root: URL
+
+  private let logger = Logger(
+    subsystem: Defs.loggerSubsystem,
+    category: Defs.LoggerCategory.service
+  )
 }
 
 private let fuzzyMatchChunkSize = 100

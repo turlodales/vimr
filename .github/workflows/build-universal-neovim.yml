@@ -1,0 +1,62 @@
+name: 'Universal Neovim'
+on:
+  push:
+    tags:
+      # example: neovim-v0.10.0-20240601.102525
+      - neovim-v[0-9]+.[0-9]+.[0-9]+-*
+
+jobs:
+  build-x86:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - run: brew bundle
+      - run: clean=true ./bin/neovim/bin/build_neovim.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvim-macos-x86_64
+          path: Neovim/build/nvim-macos-x86_64.tar.gz
+          retention-days: 1
+
+  build-arm:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - run: brew bundle
+      - run: clean=true ./bin/neovim/bin/build_neovim.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvim-macos-arm64
+          path: Neovim/build/nvim-macos-arm64.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: [build-x86, build-arm]
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+      - run: brew bundle
+      - run: |
+          mv nvim-macos-*/* .
+          rm -r nvim-macos-x86_64 nvim-macos-arm64
+      - run: ./bin/neovim/bin/build_universal_neovim.sh
+      - run: |
+          gh release create ${{ github.ref_name }} \
+            --prerelease \
+            --title "Universal ${{ github.ref_name }}" \
+            --notes "Neovim universal build with libintl, not signed." \
+            --target ${{ github.sha }} \
+            nvim-macos-x86_64.tar.gz nvim-macos-arm64.tar.gz nvim-macos-universal.tar.bz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,7 +6,7 @@
 
 import Cocoa
 import MessagePack
-import RxSwift
+import NvimApi
 
 extension NvimView {
   enum RemoteOption {
@@ -41,7 +41,7 @@ extension NvimView {
   final func handleRemoteOptions(_ options: [MessagePackValue: MessagePackValue]) {
     for kvPair in options {
       guard let option = RemoteOption.fromValuePair(kvPair) else {
-        self.bridgeLogger.debug("Could not handle RemoteOption \(kvPair)")
+        self.logger.error("Could not handle RemoteOption \(kvPair)")
         continue
       }
 
@@ -54,35 +54,28 @@ extension NvimView {
   }
 
   final func signalRemoteOptionChange(_ option: RemoteOption) {
-    let command: Completable = switch option {
-    case let .guifont(fontSpec):
-      self.api.setOptionValue(
-        name: "guifont",
-        value: .string(fontSpec),
-        opts: ["scope": .string("global")]
-      )
-
-    case let .guifontWide(fontSpec):
-      self.api.setOptionValue(
-        name: "guifontwide",
-        value: .string(fontSpec),
-        opts: ["scope": .string("global")]
-      )
+    Task {
+      switch option {
+      case let .guifont(fontSpec):
+        await self.api.nvimSetOptionValue(
+          name: "guifont",
+          value: .string(fontSpec),
+          opts: ["scope": .string("global")]
+        ).cauterize()
+      case let .guifontWide(fontSpec):
+        await self.api.nvimSetOptionValue(
+          name: "guifontwide",
+          value: .string(fontSpec),
+          opts: ["scope": .string("global")]
+        ).cauterize()
+      }
     }
-
-    command
-      .subscribe(onError: { [weak self] error in
-        // We're here probably because the font of NvimView is set before the API socket connection
-        // is established. Let's ignore the error.
-        self?.log.info("Setting \(option) did not go through: \(error).")
-      })
-      .disposed(by: self.disposeBag)
   }
 
   public final func signalError(code: Int, message: String) {
-    self.api.errWriteln(str: "E\(code): \(message)")
-      .subscribe()
-      .disposed(by: self.disposeBag)
+    Task {
+      await self.api.nvimErrWriteln(str: "E\(code): \(message)").cauterize()
+    }
   }
 
   private func handleGuifontSet(_ fontSpec: String, forWideFont wideFlag: Bool = false) {
@@ -98,21 +91,26 @@ extension NvimView {
       return
     }
 
-    guard let newFont = FontUtils.font(fromVimFontSpec: fontSpec) else {
-      self.bridgeLogger.debug("Invalid specification for guifont '\(fontSpec)'")
-
-      self.signalError(code: 596, message: "Invalid font(s): guifont=\(fontSpec)")
-      self.signalRemoteOptionChange(RemoteOption.fromFont(self.font, forWideFont: wideFlag))
-      return
+    // guifont may be a comma-separated fallback list (neovide-style) or a single
+    // VimR-style Name:hSize spec. Try each candidate in order.
+    let candidates = fontSpec.components(separatedBy: ",").map { $0.trimmingCharacters(
+      in: .whitespaces
+    ) }
+    for candidate in candidates {
+      if let newFont = FontUtils.font(fromVimFontSpec: candidate) {
+        self.font = newFont
+        // Cell size likely changed, do a resize.
+        self.resizeNeoVimUi(to: self.frame.size)
+        self.markForRenderWholeView()
+        self.delegate?.nextEvent(.guifontChanged(newFont))
+        return
+      }
     }
 
-    gui.async {
-      self.font = newFont
-      // Cell size likely changed, do a resize.
-      self.resizeNeoVimUi(to: self.frame.size)
-      self.markForRenderWholeView()
-      self.eventsSubject.onNext(.guifontChanged(newFont))
-    }
+    // No candidate matched — log quietly and push back the current font so nvim
+    // is in sync. Don't surface E596 to the user for unsupported font spec formats.
+    self.logger.error("No usable font in guifont spec '\(fontSpec)' — keeping current font")
+    self.signalRemoteOptionChange(RemoteOption.fromFont(self.font, forWideFont: wideFlag))
   }
 }
 

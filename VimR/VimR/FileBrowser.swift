@@ -7,12 +7,9 @@ import Cocoa
 import Commons
 import MaterialIcons
 import PureLayout
-import RxSwift
 import Workspace
 
-final class FileBrowser: NSView,
-  UiComponent
-{
+final class FileBrowser: NSView, UiComponent {
   typealias StateType = MainWindow.State
 
   enum Action {
@@ -22,18 +19,21 @@ final class FileBrowser: NSView,
     case refresh
   }
 
+  let uuid = UUID()
   let innerCustomToolbar = InnerCustomToolbar()
   let menuItems: [NSMenuItem]
 
   override var isFirstResponder: Bool { self.fileView.isFirstResponder }
 
-  required init(source: Observable<StateType>, emitter: ActionEmitter, state: StateType) {
-    self.emit = emitter.typedEmit()
-    self.uuid = state.uuid
+  required init(context: ReduxContext, state: StateType) {
+    self.context = context
+    self.emit = context.actionEmitter.typedEmit()
+    self.mainWinUuid = state.uuid
 
     self.cwd = state.cwd
+    self.isRemote = state.remoteSocketPath != nil
 
-    self.fileView = FileOutlineView(source: source, emitter: emitter, state: state)
+    self.fileView = FileOutlineView(context: context, state: state)
 
     self.showHiddenMenuItem = NSMenuItem(
       title: "Show Hidden Files",
@@ -49,26 +49,29 @@ final class FileBrowser: NSView,
     self.showHiddenMenuItem.target = self
     self.innerCustomToolbar.fileBrowser = self
 
-    source
-      .observe(on: MainScheduler.instance)
-      .subscribe(onNext: { state in
-        if self.cwd != state.cwd {
-          self.cwd = state.cwd
-          self.innerCustomToolbar.goToParentButton.isEnabled = state.cwd.path != "/"
-        }
+    self.context.subscribe(uuid: self.uuid) { appState in
+      guard let state = appState.mainWindows[self.mainWinUuid] else { return }
 
-        self.currentBufferUrl = state.currentBuffer?.url
-        self.showHiddenMenuItem.boolState = state.fileBrowserShowHidden
-      })
-      .disposed(by: self.disposeBag)
+      if self.cwd != state.cwd {
+        self.cwd = state.cwd
+        self.innerCustomToolbar.goToParentButton.isEnabled = state.cwd.path != "/"
+      }
+
+      self.currentBufferUrl = state.currentBuffer?.url
+      self.showHiddenMenuItem.boolState = state.fileBrowserShowHidden
+    }
   }
 
-  deinit { self.fileView.unbindTreeController() }
+  func cleanup() {
+    self.context.unsubscribe(uuid: self.uuid)
+    self.fileView.cleanup()
+  }
 
+  private let context: ReduxContext
   private let emit: (UuidAction<Action>) -> Void
-  private let disposeBag = DisposeBag()
 
-  private let uuid: UUID
+  private let mainWinUuid: UUID
+  private let isRemote: Bool
 
   private var currentBufferUrl: URL?
 
@@ -81,12 +84,27 @@ final class FileBrowser: NSView,
   required init?(coder _: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   private func addViews() {
-    let scrollView = NSScrollView.standardScrollView()
-    scrollView.borderType = .noBorder
-    scrollView.documentView = self.fileView
+    if self.isRemote {
+      let label = NSTextField(
+        labelWithString: "File browser is not available\nfor remote connections."
+      )
+      label.alignment = .center
+      label.textColor = .secondaryLabelColor
+      label.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+      label.isSelectable = false
 
-    self.addSubview(scrollView)
-    scrollView.autoPinEdgesToSuperviewEdges()
+      self.addSubview(label)
+      label.autoCenterInSuperview()
+      label.autoPinEdge(toSuperviewEdge: .left, withInset: 16)
+      label.autoPinEdge(toSuperviewEdge: .right, withInset: 16)
+    } else {
+      let scrollView = NSScrollView.standardScrollView()
+      scrollView.borderType = .noBorder
+      scrollView.documentView = self.fileView
+
+      self.addSubview(scrollView)
+      scrollView.autoPinEdgesToSuperviewEdges()
+    }
   }
 }
 
@@ -183,11 +201,11 @@ extension FileBrowser {
   @objc func showHiddenAction(_ sender: Any?) {
     guard let menuItem = sender as? NSMenuItem else { return }
 
-    self.emit(UuidAction(uuid: self.uuid, action: .setShowHidden(!menuItem.boolState)))
+    self.emit(UuidAction(uuid: self.mainWinUuid, action: .setShowHidden(!menuItem.boolState)))
   }
 
   @objc func goToParentAction(_: Any?) {
-    self.emit(UuidAction(uuid: self.uuid, action: .setAsWorkingDirectory(self.cwd.parent)))
+    self.emit(UuidAction(uuid: self.mainWinUuid, action: .setAsWorkingDirectory(self.cwd.parent)))
   }
 
   @objc func scrollToSourceAction(_: Any?) {
@@ -197,6 +215,6 @@ extension FileBrowser {
   }
 
   @objc func refreshAction(_: Any?) {
-    self.emit(UuidAction(uuid: self.uuid, action: .refresh))
+    self.emit(UuidAction(uuid: self.mainWinUuid, action: .refresh))
   }
 }

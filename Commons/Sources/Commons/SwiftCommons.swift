@@ -37,16 +37,6 @@ public extension String {
 }
 
 public extension Array where Element: Equatable {
-  func removingDuplicatesPreservingFromBeginning() -> [Element] {
-    var result = [Element]()
-
-    for value in self {
-      if result.contains(value) == false { result.append(value) }
-    }
-
-    return result
-  }
-
   /**
    Returns an array where elements of `elements` contained in the array are substituted
    by elements of `elements`. This is useful when you need pointer equality
@@ -85,7 +75,9 @@ func tuplesToDict<K: Hashable, V, S: Sequence>(_ sequence: S)
 {
   var result = [K: V](minimumCapacity: sequence.underestimatedCount)
 
-  for (key, value) in sequence { result[key] = value }
+  for (key, value) in sequence {
+    result[key] = value
+  }
 
   return result
 }
@@ -106,16 +98,9 @@ public extension Dictionary {
   }
 }
 
-public extension Sequence {
-  @discardableResult
-  func log() -> Self {
-    self.forEach { Swift.print($0) }
-    return self
-  }
-}
-
 // From https://stackoverflow.com/a/55560988
+// We know that the regex is valid.
+// swiftlint:disable:next force_try
 private let shellEscapeRegex = try! NSRegularExpression(
-  // We know that the following regex is valid.
   pattern: "([ !\\\"\\#\\$\\%\\&\\'\\(\\)\\*\\,\\:\\;\\<\\=\\>\\?\\[\\]\\`\\{\\|\\}\\~])"
 )

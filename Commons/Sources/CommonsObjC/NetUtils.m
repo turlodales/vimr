@@ -9,19 +9,20 @@
 #import <sys/socket.h>
 #import <netinet/in.h>
 
-static os_log_t logger;
+static os_log_t logger = NULL;
 
 @implementation NetUtils
+
++ (void)initialize {
+  if (self == [NetUtils class]) {
+    logger = os_log_create("com.qvacua.VimR", "general");
+  }
+}
 
 // from https://developer.apple.com/library/content/documentation/NetworkingInternet/Conceptual/NetworkingTopics/Articles/UsingSocketsandSocketStreams.html#//apple_ref/doc/uid/CH73-SW9
 // and http://stackoverflow.com/a/20850182/6939513
 // slightly modified
 + (in_port_t)openPort {
-  static dispatch_once_t token;
-  dispatch_once(&token, ^{
-    // See Defs.swift
-    logger = os_log_create("com.qvacua.VimR", "general");
-  });
 
   const int sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
@@ -29,17 +30,16 @@ static os_log_t logger;
     return 0;
   }
 
-  struct sockaddr_in sin;
-  memset(&sin, 0, sizeof(sin));
-
-  sin.sin_len = sizeof(sin);
-  sin.sin_family = AF_INET;
-  sin.sin_port = htons(0);
+  struct sockaddr_in sin = {
+    .sin_len = sizeof(sin),
+    .sin_family = AF_INET,
+    .sin_port = htons(0),
+    .sin_addr.s_addr = INADDR_ANY
+  };
 
   if (bind(sock, (struct sockaddr *) &sin, sizeof(sin)) < 0) {
     if (errno == EADDRINUSE) {
       os_log_error(logger, "the port is not available.");
-      return 0;
     } else {
       os_log_error(
           logger,
@@ -47,13 +47,15 @@ static os_log_t logger;
           errno,
           strerror(errno)
       );
-      return 0;
     }
+    close(sock);
+    return 0;
   }
 
   socklen_t len = sizeof(sin);
   if (getsockname(sock, (struct sockaddr *) &sin, &len) == -1) {
     os_log_error(logger, "getsockname failed.");
+    close(sock);
     return 0;
   }
 

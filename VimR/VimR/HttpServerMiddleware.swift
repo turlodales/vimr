@@ -18,8 +18,10 @@ final class HttpServerMiddleware {
     // We know that the URL is valid!
     let baseUrl = URL(string: "http://\(localhost):\(port)")!
 
+    // swiftlint:disable force_try
     let cssOverridesTemplate = try! String(contentsOf: Resources.cssOverridesTemplateUrl)
     let selectFirstHtmlTemplate = try! String(contentsOf: Resources.selectFirstHtmlTemplateUrl)
+    // swiftlint:enable force_try
 
     let server = HttpServer()
     server.listenAddressIPv4 = localhost
@@ -49,7 +51,7 @@ final class HttpServerMiddleware {
 
     do {
       try server.start(in_port_t(port), forceIPv4: true)
-      self.log.info("VimR http server started on \(baseUrl)")
+      dlog.debug("VimR http server started on \(baseUrl)")
 
 //      server["\(HtmlPreviewToolReducer.basePath)/:path"] = shareFilesFromDirectory(
 //        Resources.previewUrl.path
@@ -58,11 +60,11 @@ final class HttpServerMiddleware {
 //        Resources.cssUrl.path
 //      )
     } catch {
-      self.log.error("Server could not be started on port \(port): \(error)")
+      self.logger.error("Server could not be started on port \(port): \(error)")
     }
   }
 
-  private let log = OSLog(
+  private let logger = Logger(
     subsystem: Defs.loggerSubsystem,
     category: Defs.LoggerCategory.middleware
   )
@@ -103,7 +105,7 @@ final class HttpServerMiddleware {
           HtmlPreviewMiddleware.selectFirstHtmlUrl(uuid: state.uuid).path
         )
 
-        self.log.info("Serving on \(self.fullUrl(with: serverUrl.payload.path)) the select first")
+        dlog.debug("Serving on \(self.fullUrl(with: serverUrl.payload.path)) the select first")
 
         return result
       }
@@ -112,11 +114,6 @@ final class HttpServerMiddleware {
     private let server: HttpServer
     private let baseUrl: URL
     private let cssUrl: URL
-
-    private let log = OSLog(
-      subsystem: Defs.loggerSubsystem,
-      category: Defs.LoggerCategory.middleware
-    )
 
     private func fullUrl(with path: String) -> URL { self.baseUrl.appendingPathComponent(path) }
   }
@@ -151,7 +148,7 @@ final class HttpServerMiddleware {
         self.server.GET[serverUrl.payload.path] = shareFile(htmlFileUrl.path)
         self.server["\(basePath)/:path"] = shareFilesFromDirectory(htmlFileUrl.parent.path)
 
-        self.log.info(
+        dlog.debug(
           "Serving on \(self.fullUrl(with: serverUrl.payload.path)) the HTML file \(htmlFileUrl)"
         )
 
@@ -162,11 +159,6 @@ final class HttpServerMiddleware {
     private let server: HttpServer
     private let baseUrl: URL
     private let cssUrl: URL
-
-    private let log = OSLog(
-      subsystem: Defs.loggerSubsystem,
-      category: Defs.LoggerCategory.middleware
-    )
 
     private func fullUrl(with path: String) -> URL { self.baseUrl.appendingPathComponent(path) }
   }
@@ -188,11 +180,8 @@ final class HttpServerMiddleware {
 
         let uuidAction = tuple.action
         switch uuidAction.payload {
-        case .newCurrentBuffer: fallthrough
-        case .bufferWritten: fallthrough
-        case .setTheme:
+        case .newCurrentBuffer, .bufferWritten, .setTheme:
           break
-
         default:
           return result
         }
@@ -201,7 +190,7 @@ final class HttpServerMiddleware {
         guard let htmlUrl = preview.html,
               let serverUrl = preview.server else { return result }
 
-        self.log.debug("Serving \(htmlUrl) on \(serverUrl)")
+        dlog.debug("Serving \(htmlUrl) on \(serverUrl)")
         let htmlBasePath = serverUrl.deletingLastPathComponent().path
 
         if let bufferUrl = preview.buffer {
@@ -214,7 +203,7 @@ final class HttpServerMiddleware {
         self.server.GET["\(htmlBasePath)/github-markdown.css"] = shareFile(self.cssUrl.path)
         self.server.GET["\(htmlBasePath)/base.css"] = shareFile(self.baseCssUrl.path)
 
-        self.log.info("Serving on \(self.fullUrl(with: serverUrl.path)) for markdown preview")
+        dlog.debug("Serving on \(self.fullUrl(with: serverUrl.path)) for markdown preview")
 
         return result
       }
@@ -224,11 +213,6 @@ final class HttpServerMiddleware {
     private let baseUrl: URL
     private let cssUrl: URL
     private let baseCssUrl: URL
-
-    private let log = OSLog(
-      subsystem: Defs.loggerSubsystem,
-      category: Defs.LoggerCategory.middleware
-    )
 
     private func fullUrl(with path: String) -> URL { self.baseUrl.appendingPathComponent(path) }
   }

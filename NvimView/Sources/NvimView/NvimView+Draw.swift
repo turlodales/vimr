@@ -4,21 +4,17 @@
  */
 
 import Cocoa
+import os
 
 extension NvimView {
   override public func viewDidMoveToWindow() { self.window?.colorSpace = colorSpace }
 
-  override public func draw(_ dirtyUnionRect: NSRect) {
+  override public func draw(_: NSRect) {
     guard self.ugrid.hasData else { return }
 
     guard let context = NSGraphicsContext.current?.cgContext else { return }
     context.saveGState()
     defer { context.restoreGState() }
-
-    if self.inLiveResize || self.currentlyResizing, !self.usesLiveResize {
-      self.drawResizeInfo(in: context, with: dirtyUnionRect)
-      return
-    }
 
     if self.isCurrentlyPinching {
       self.drawPinchImage(in: context)
@@ -43,8 +39,8 @@ extension NvimView {
 
     let dirtyRects = self.rectsBeingDrawn()
 
-    self.draw(defaultBackgroundIn: dirtyRects, in: context)
     self.draw(cellsIntersectingRects: dirtyRects, in: context)
+
     self.draw(cursorIn: context)
 
     #if DEBUG
@@ -52,24 +48,13 @@ extension NvimView {
     #endif
   }
 
-  private func draw(
-    cellsIntersectingRects dirtyRects: [CGRect], in context: CGContext
-  ) {
+  private func draw(cellsIntersectingRects dirtyRects: [CGRect], in context: CGContext) {
     self.drawer.draw(
       self.runs(intersecting: dirtyRects),
       defaultAttributes: self.cellAttributesCollection.defaultAttributes,
       offset: self.offset,
       in: context
     )
-  }
-
-  private func draw(
-    defaultBackgroundIn dirtyRects: [CGRect], in context: CGContext
-  ) {
-    context.setFillColor(
-      ColorUtils.cgColorIgnoringAlpha(self.cellAttributesCollection.defaultAttributes.background)
-    )
-    context.fill(dirtyRects)
   }
 
   private func draw(cursorIn context: CGContext) {
@@ -82,18 +67,18 @@ extension NvimView {
       || cursorRegion.left < 0
       || cursorRegion.right > self.ugrid.size.width - 1
     {
-      self.log.error("\(cursorRegion) vs. \(self.ugrid.size)")
+      self.logger.error("\(cursorRegion) vs. \(self.ugrid.size)")
       return
     }
     guard let cellAtCursorAttrs = self.cellAttributesCollection.attributes(
       of: self.ugrid.cells[cursorPosition.row][cursorPosition.column].attrId
     ) else {
-      self.log.error("Could not get the attributes at cursor: \(cursorPosition)")
+      self.logger.error("Could not get the attributes at cursor: \(cursorPosition)")
       return
     }
 
     guard let modeInfo = modeInfos[self.mode.rawValue] else {
-      self.log.error("Could not get modeInfo for mode index \(self.mode.rawValue)")
+      self.logger.error("Could not get modeInfo for mode index \(self.mode.rawValue)")
       return
     }
 
@@ -103,7 +88,7 @@ extension NvimView {
             withDefaults: cellAtCursorAttrs
           )
     else {
-      self.log.error("Could not get the attributes for cursor in mode: \(mode) \(modeInfo)")
+      self.logger.error("Could not get the attributes for cursor in mode: \(mode) \(modeInfo)")
       return
     }
 
@@ -145,37 +130,6 @@ extension NvimView {
     context.restoreGState()
   }
 
-  private func drawResizeInfo(
-    in context: CGContext, with dirtyUnionRect: CGRect
-  ) {
-    context.setFillColor(self.theme.background.cgColor)
-    context.fill(dirtyUnionRect)
-
-    let boundsSize = self.bounds.size
-
-    let emojiSize = self.currentEmoji.size(withAttributes: emojiAttrs)
-    let emojiX = (boundsSize.width - emojiSize.width) / 2
-    let emojiY = (boundsSize.height - emojiSize.height) / 2
-
-    let discreteSize = self.discreteSize(size: boundsSize)
-    let displayStr = "\(discreteSize.width) × \(discreteSize.height)"
-    let infoStr = "(You can turn on live resizing feature in the Advanced preferences)"
-
-    var (sizeAttrs, infoAttrs) = (resizeTextAttrs, infoTextAttrs)
-    sizeAttrs[.foregroundColor] = self.theme.foreground
-    infoAttrs[.foregroundColor] = self.theme.foreground
-
-    let size = displayStr.size(withAttributes: sizeAttrs)
-    let (x, y) = ((boundsSize.width - size.width) / 2, emojiY - size.height)
-
-    let infoSize = infoStr.size(withAttributes: infoAttrs)
-    let (infoX, infoY) = ((boundsSize.width - infoSize.width) / 2, y - size.height - 5)
-
-    self.currentEmoji.draw(at: CGPoint(x: emojiX, y: emojiY), withAttributes: emojiAttrs)
-    displayStr.draw(at: CGPoint(x: x, y: y), withAttributes: sizeAttrs)
-    infoStr.draw(at: CGPoint(x: infoX, y: infoY), withAttributes: infoAttrs)
-  }
-
   private func drawPinchImage(in context: CGContext) {
     context.interpolationQuality = .none
 
@@ -195,49 +149,45 @@ extension NvimView {
   }
 
   private func runs(intersecting rects: [CGRect]) -> [AttributesRun] {
-    rects
-      .map { rect in
-        // Get all Regions that intersects with the given rects.
-        // There can be overlaps between the Regions,
-        // but for the time being we ignore them;
-        // probably not necessary to optimize them away.
-        let region = self.region(for: rect)
-        return (region.rowRange, region.columnRange)
-      }
-      // All RowRuns for all Regions grouped by their row range.
-      .map { self.runs(forRowRange: $0, columnRange: $1) }
-      // Flattened RowRuns for all Regions.
-      .flatMap { $0 }
+    rects.flatMap { rect in
+      let region = self.region(for: rect)
+      return self.runs(forRowRange: region.rowRange, columnRange: region.columnRange)
+    }
   }
 
   private func runs(
     forRowRange rowRange: ClosedRange<Int>,
     columnRange: ClosedRange<Int>
   ) -> [AttributesRun] {
-    rowRange.map { row in
-      groupedRanges(of: self.ugrid.cells[row][columnRange])
-        .compactMap { range in
-          let cells = self.ugrid.cells[row][range]
+    var result = [AttributesRun]()
+    // Estimate the capacity, median value from scrolling through a big Swift file
+    result.reserveCapacity(rowRange.count * 3)
 
-          guard let firstCell = cells.first,
-                let attrs = self.cellAttributesCollection.attributes(of: firstCell.attrId)
-          else {
-            // GH-666: FIXME: correct error handling
-            self.log.error(
-              "row: \(row), range: \(range): Could not get CellAttributes with ID " +
-                "\(String(describing: cells.first?.attrId))"
-            )
-            return nil
-          }
-
-          return AttributesRun(
-            location: self.pointInView(forRow: row, column: range.lowerBound),
-            cells: self.ugrid.cells[row][range],
-            attrs: attrs
+    // We use for-loops instead of flatMap and compactMap because, normal for-loops seem to be
+    // faster. Average duration of the function using signpost in Instruments indicates 45% win.
+    for row in rowRange {
+      let ranges = groupedRanges(of: self.ugrid.cells[row][columnRange])
+      
+      for range in ranges {
+        guard let attrs = self.cellAttributesCollection.attributes(
+          of: self.ugrid.cells[row][range.lowerBound].attrId
+        ) else {
+          self.logger.error(
+            "row: \(row), range: \(range): Could not get CellAttributes with ID " +
+              "\(self.ugrid.cells[row][range.lowerBound].attrId)"
           )
+          continue
         }
+
+        result.append(AttributesRun(
+          location: self.pointInView(forRow: row, column: range.lowerBound),
+          cells: self.ugrid.cells[row][range],
+          attrs: attrs
+        ))
+      }
     }
-    .flatMap { $0 }
+
+    return result
   }
 
   func updateFontMetaData(_ newFont: NSFont) {
@@ -252,18 +202,6 @@ extension NvimView {
   }
 }
 
-private let emojiAttrs = [NSAttributedString.Key.font: NSFont(name: "AppleColorEmoji", size: 72)!]
-
-private let resizeTextAttrs = [
-  NSAttributedString.Key.font: NSFont.systemFont(ofSize: 18),
-  NSAttributedString.Key.foregroundColor: NSColor.darkGray,
-]
-
-private let infoTextAttrs = [
-  NSAttributedString.Key.font: NSFont.systemFont(ofSize: 16),
-  NSAttributedString.Key.foregroundColor: NSColor.darkGray,
-]
-
 private let colorSpace = NSColorSpace.sRGB
 
 /// When we use the following private function instead of the public extension function in
@@ -273,30 +211,22 @@ private let colorSpace = NSColorSpace.sRGB
 /// present in Commons lib.
 private func groupedRanges(of cells: ArraySlice<UCell>) -> [ClosedRange<Int>] {
   if cells.isEmpty { return [] }
-  if cells.count == 1 { return [cells.startIndex...cells.startIndex] }
 
   var result = [ClosedRange<Int>]()
   result.reserveCapacity(cells.count / 2)
 
-  let inclusiveEndIndex = cells.endIndex - 1
-  var lastStartIndex = cells.startIndex
-  var lastEndIndex = cells.startIndex
-  var lastMarker = cells.first!.attrId // cells is not empty!
-  for i in cells.startIndex..<cells.endIndex {
+  var startIndex = cells.startIndex
+  var lastMarker = cells[startIndex].attrId
+
+  for i in cells.indices.dropFirst() {
     let currentMarker = cells[i].attrId
-
-    if lastMarker == currentMarker {
-      if i == inclusiveEndIndex { result.append(lastStartIndex...i) }
-    } else {
-      result.append(lastStartIndex...lastEndIndex)
+    if currentMarker != lastMarker {
+      result.append(startIndex...(i - 1))
+      startIndex = i
       lastMarker = currentMarker
-      lastStartIndex = i
-
-      if i == inclusiveEndIndex { result.append(i...i) }
     }
-
-    lastEndIndex = i
   }
+  result.append(startIndex...(cells.endIndex - 1))
 
   return result
 }

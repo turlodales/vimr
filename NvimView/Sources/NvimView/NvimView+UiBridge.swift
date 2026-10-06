@@ -7,192 +7,167 @@ import Carbon
 import Cocoa
 import Foundation
 import MessagePack
+import NvimApi
 import os
-import RxNeovim
-import RxPack
-import RxSwift
 
 extension NvimView {
   final func markForRenderWholeView() {
-    self.bridgeLogger.debug()
+    dlog.debug()
     self.needsDisplay = true
   }
 
   final func markForRender(region: Region) {
-    self.bridgeLogger.debug(region)
+    dlog.debug(region)
     self.setNeedsDisplay(self.rect(for: region))
   }
 
-  final func stop() {
-    self.bridgeLogger.debug()
-    self.quit()
-      .andThen(self.api.stop())
-      .andThen(Completable.create { [weak self] completable in
-        self?.eventsSubject.onNext(.neoVimStopped)
-        self?.eventsSubject.onCompleted()
-
-        completable(.completed)
-        return Disposables.create()
-      })
-      .subscribe(onCompleted: { [weak self] in
-        self?.bridgeLogger.info("Successfully stopped the bridge.")
-        self?.nvimExitedCondition.broadcast()
-      }, onError: {
-        self.bridgeLogger.fault("There was an error stopping the bridge: \($0)")
-      })
-      .disposed(by: self.disposeBag)
-  }
-
   final func renderData(_ renderData: [MessagePackValue]) {
-    self.bridgeLogger.trace("# of render data: \(renderData.count)")
+    dlog.trace("# of render data: \(renderData.count)")
 
-    gui.async { [self] in
-      var (recompute, rowStart) = (false, Int.max)
-      renderData.forEach { value in
-        guard let renderEntry = value.arrayValue else { return }
-        guard renderEntry.count >= 2 else { return }
+    var (recompute, rowStart) = (false, Int.max)
+    for value in renderData {
+      guard let renderEntry = value.arrayValue else { continue }
+      guard renderEntry.count >= 2 else { continue }
 
-        guard let rawType = renderEntry[0].stringValue,
-              let innerArray = renderEntry[1].arrayValue
-        else {
-          self.bridgeLogger.error("Could not convert \(value)")
-          return
-        }
-
-        switch rawType {
-        case "mode_change":
-          self.modeChange(renderEntry[1])
-
-        case "grid_line":
-          for index in 1..<renderEntry.count {
-            guard let grid_line = renderEntry[index].arrayValue else {
-              self.bridgeLogger.error("Could not convert \(value)")
-              return
-            }
-            let possibleNewRowStart = self.doRawLineNu(data: grid_line)
-            rowStart = min(rowStart, possibleNewRowStart)
-          }
-          recompute = true
-
-        case "grid_resize":
-          self.resize(renderEntry[1])
-          rowStart = 0 // Do not persist prior rowStart as it may be OOB
-          recompute = true
-
-        case "hl_attr_define":
-          for index in 1..<renderEntry.count {
-            self.setAttr(with: renderEntry[index])
-          }
-
-        case "default_colors_set":
-          self.defaultColors(with: renderEntry[1])
-
-        case "grid_clear":
-          self.clear()
-          recompute = true
-
-        case "win_viewport":
-          // FIXME: implement
-          self.winViewportUpdate(innerArray)
-
-        case "mouse_on":
-          self.mouseOn()
-
-        case "mouse_off":
-          self.mouseOff()
-
-        case "busy_start":
-          self.busyStart()
-
-        case "busy_stop":
-          self.busyStop()
-
-        case "option_set":
-          self.optionSet(renderEntry)
-
-        case "set_title":
-          self.setTitle(with: innerArray[0])
-
-        case "update_menu":
-          self.updateMenu()
-
-        case "bell":
-          self.bell()
-
-        case "visual_bell":
-          self.visualBell()
-
-        case "set_icon":
-          // FIXME:
-          break
-
-        case "grid_cursor_goto":
-          guard let _ /* grid */ = innerArray[0].uintValue,
-                let row = innerArray[1].uintValue,
-                let col = innerArray[2].uintValue
-          else { return }
-
-          if let possibleNewRowStart = self.doGoto(
-            position: Position(row: Int(row), column: Int(col)),
-            textPosition: Position(row: Int(row), column: Int(col))
-          ) {
-            rowStart = min(rowStart, possibleNewRowStart)
-            recompute = true
-          }
-
-        case "mode_info_set":
-          self.modeInfoSet(renderEntry[1])
-
-        case "grid_scroll":
-          let values = innerArray.compactMap(\.intValue)
-          guard values.count == 7 else {
-            self.bridgeLogger.error("Could not convert \(values)")
-            return
-          }
-
-          let possibleNewRowStart = self.doScrollNu(values)
-          rowStart = min(possibleNewRowStart, rowStart)
-          recompute = true
-
-        case "flush":
-          self.flush()
-
-        case "tabline_update":
-          self.tablineUpdate(innerArray)
-
-        default:
-          self.log.error("Unknown flush data type \(rawType)")
-        }
+      guard let rawType = renderEntry[0].stringValue,
+            let innerArray = renderEntry[1].arrayValue
+      else {
+        self.logger.error("Could not convert \(value)")
+        continue
       }
 
-      guard recompute else { return }
-      if rowStart < Int.max {
-        self.ugrid.recomputeFlatIndices(rowStart: rowStart)
+      switch rawType {
+      case "mode_change":
+        self.modeChange(renderEntry[1])
+
+      case "grid_line":
+        for index in 1..<renderEntry.count {
+          guard let grid_line = renderEntry[index].arrayValue else {
+            self.logger.error("Could not convert \(value)")
+            continue
+          }
+          let possibleNewRowStart = self.doRawLineNu(data: grid_line)
+          rowStart = min(rowStart, possibleNewRowStart)
+        }
+        recompute = true
+
+      case "grid_resize":
+        self.resize(renderEntry[1])
+        rowStart = 0 // Do not persist prior rowStart as it may be OOB
+        recompute = true
+
+      case "hl_attr_define":
+        for index in 1..<renderEntry.count {
+          self.setAttr(with: renderEntry[index])
+        }
+
+      case "default_colors_set":
+        self.defaultColors(with: renderEntry[1])
+
+      case "grid_clear":
+        self.clear()
+        recompute = true
+
+      case "win_viewport":
+        // FIXME: implement
+        self.winViewportUpdate(innerArray)
+
+      case "mouse_on":
+        self.mouseOn()
+
+      case "mouse_off":
+        self.mouseOff()
+
+      case "busy_start":
+        self.busyStart()
+
+      case "busy_stop":
+        self.busyStop()
+
+      case "option_set":
+        self.optionSet(renderEntry)
+
+      case "set_title": self.setTitle(with: innerArray[0])
+
+      case "update_menu":
+        self.updateMenu()
+
+      case "bell":
+        self.bell()
+
+      case "visual_bell":
+        self.visualBell()
+
+      case "set_icon":
+        // FIXME:
+        break
+
+      case "grid_cursor_goto":
+        guard innerArray[0].uintValue != nil, // grid
+              let row = innerArray[1].uintValue,
+              let col = innerArray[2].uintValue
+        else { continue }
+
+        if let possibleNewRowStart = self.doGoto(
+          position: Position(row: Int(row), column: Int(col)),
+          textPosition: Position(row: Int(row), column: Int(col))
+        ) {
+          rowStart = min(rowStart, possibleNewRowStart)
+          recompute = true
+        }
+          
+      case "mode_info_set":
+        self.modeInfoSet(renderEntry[1])
+
+      case "grid_scroll":
+        let values = innerArray.compactMap(\.intValue)
+        guard values.count == 7 else {
+          self.logger.error("Could not convert \(values)")
+          continue
+        }
+
+        let possibleNewRowStart = self.doScrollNu(values)
+        rowStart = min(possibleNewRowStart, rowStart)
+        recompute = true
+
+      case "flush":
+        self.flush()
+
+      case "tabline_update":
+        self.tablineUpdate(innerArray)
+
+      default:
+        self.logger.error("Unknown flush data type \(rawType)")
       }
+    }
+
+    guard recompute else { return }
+    if rowStart < Int.max {
+      self.ugrid.recomputeFlatIndices(rowStart: rowStart)
     }
   }
 
-  final func autoCommandEvent(_ array: [MessagePackValue]) {
+  final func autoCommandEvent(_ array: [MessagePackValue]) async {
     guard array.count > 0,
           let aucmd = array[0].stringValue?.lowercased(),
           let event = NvimAutoCommandEvent(rawValue: aucmd)
     else {
-      self.bridgeLogger.error("Could not convert \(array)")
+      self.logger.error("Could not convert \(array)")
       return
     }
 
-    self.bridgeLogger.debug("\(event): \(array)")
+    dlog.debug("\(event): \(array)")
 
     // vimenter is handled in NvimView.swift
 
     if event == .vimleave {
-      self.stop()
+      await self.stop()
       return
     }
 
     if event == .dirchanged {
       guard array.count > 1, array[1].stringValue != nil else {
-        self.bridgeLogger.error("Could not convert \(array)")
+        self.logger.error("Could not convert \(array)")
         return
       }
       self.cwdChanged(array[1])
@@ -205,32 +180,32 @@ extension NvimView {
     }
 
     guard array.count > 1, let bufferHandle = array[1].intValue else {
-      self.bridgeLogger.error("Could not convert \(array)")
+      self.logger.error("Nothing we handle here: \(array)")
       return
     }
 
     if event == .bufmodifiedset {
       guard array.count > 2 else {
-        self.bridgeLogger.error("Could not convert \(array)")
+        self.logger.error("Could not convert \(array)")
         return
       }
       self.setDirty(with: array[2])
     }
 
     if event == .bufwinenter || event == .bufwinleave {
-      self.bufferListChanged()
+      await self.bufferListChanged()
     }
 
     if event == .tabenter {
-      self.eventsSubject.onNext(.tabChanged)
+      self.delegate?.nextEvent(.tabChanged)
     }
 
     if event == .bufwritepost {
-      self.bufferWritten(bufferHandle)
+      await self.bufferWritten(bufferHandle)
     }
 
     if event == .bufenter {
-      self.newCurrentBuffer(bufferHandle)
+      await self.newCurrentBuffer(bufferHandle)
     }
   }
 }
@@ -238,30 +213,21 @@ extension NvimView {
 // MARK: Private
 
 extension NvimView {
-  private func optionSet(_ value: MessagePackValue) {
-    guard let options = value.dictionaryValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
-      return
-    }
-
-    self.handleRemoteOptions(options)
-  }
-
   private func resize(_ value: MessagePackValue) {
     guard let array = value.arrayValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
     guard array.count == 3 else {
-      self.bridgeLogger.error("Could not convert; wrong count: \(array)")
+      self.logger.error("Could not convert; wrong count: \(array)")
       return
     }
 
-    guard let _ /* grid */ = array[0].intValue,
+    guard array[0].intValue != nil, // grid
           let width = array[1].intValue,
           let height = array[2].intValue
     else {
-      self.bridgeLogger.error("Could not convert; wrong count: \(array)")
+      self.logger.error("Could not convert; wrong count: \(array)")
       return
     }
 
@@ -273,7 +239,7 @@ extension NvimView {
     var options: [MessagePackValue: MessagePackValue] = [:]
     for index in 1..<values.count {
       guard let option_pair = values[index].arrayValue, option_pair.count == 2 else {
-        self.bridgeLogger.error("Could not convert \(values)")
+        self.logger.error("Could not convert \(values)")
         continue
       }
       options[option_pair[0]] = option_pair[1]
@@ -283,7 +249,7 @@ extension NvimView {
   }
 
   private func clear() {
-    self.bridgeLogger.debug()
+    dlog.debug()
 
     self.ugrid.clear()
     self.markForRenderWholeView()
@@ -293,16 +259,16 @@ extension NvimView {
     guard let mainTuple = value.arrayValue,
           mainTuple.count == 2,
           let modeName = mainTuple[0].stringValue,
-          let _ /* modeIndex */ = mainTuple[1].uintValue
+          mainTuple[1].uintValue != nil // modeIndex
     else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
 
     guard let modeShape = CursorModeShape(rawValue: modeName),
           self.modeInfos[modeName] != nil
     else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
 
@@ -310,14 +276,14 @@ extension NvimView {
 
     self.lastMode = self.mode
     self.mode = modeShape
-    self.bridgeLogger.debug("\(self.lastMode) -> \(self.mode)")
+    dlog.debug("\(self.lastMode) -> \(self.mode)")
     self.handleInputMethodSource()
   }
 
   private func modeInfoSet(_ value: MessagePackValue) {
     // value[0] = cursorStyleEnabled: Bool
     // value[1] = modeInfoList: [ModeInfo]]
-    self.bridgeLogger.trace("modeInfoSet: \(value)")
+    dlog.trace("modeInfoSet: \(value)")
     if let mainTuple = value.arrayValue,
        mainTuple.count == 2,
        let modeInfoArray = mainTuple[1].arrayValue?.map({
@@ -333,71 +299,64 @@ extension NvimView {
 
   private func setTitle(with value: MessagePackValue) {
     guard let title = value.stringValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
 
-    self.bridgeLogger.debug(title)
-    self.eventsSubject.onNext(.setTitle(title))
+    dlog.debug(title)
+    self.delegate?.nextEvent(.setTitle(title))
   }
 
-  private func ipcBecameInvalid(_ error: Swift.Error) {
-    self.bridgeLogger.fault("Bridge became invalid: \(error)")
+  private func ipcBecameInvalid(_ error: Swift.Error) async {
+    self.logger.fault("Bridge became invalid: \(error)")
 
-    self.eventsSubject.onNext(.ipcBecameInvalid(error.localizedDescription))
-    self.eventsSubject.onCompleted()
+    self.delegate?.nextEvent(.ipcBecameInvalid(error.localizedDescription))
 
-    self.bridgeLogger.fault("Force-closing due to IPC error.")
-    try? self.api
-      .stop()
-      .andThen(self.bridge.forceQuit())
-      .observe(on: MainScheduler.instance)
-      .wait(onCompleted: { [weak self] in
-        self?.bridgeLogger.fault("Successfully force-closed the bridge.")
-      }, onError: { [weak self] in
-        self?.bridgeLogger.fault("There was an error force-closing the bridge: \($0)")
-      })
+    self.logger.fault("Force-closing due to IPC error.")
+    await self.api.stop()
+    self.nvimProc.forceQuit()
+    self.logger.fault("Successfully force-closed the bridge.")
   }
 
   private func flush() {
-    for region in self.regionsToFlush { self.markForRender(region: region) }
+    for region in self.regionsToFlush {
+      self.markForRender(region: region)
+    }
     self.regionsToFlush.removeAll(keepingCapacity: true)
   }
 
   private func doRawLineNu(data: [MessagePackValue]) -> Int {
     guard data.count == 5 else {
-      self.bridgeLogger.error("Could not convert; wrong count: \(data)")
+      self.logger.error("Could not convert; wrong count: \(data)")
       return Int.max
     }
 
-    guard let _ /* grid */ = data[0].intValue,
+    guard data[0].intValue != nil, // grid
           let row = data[1].intValue,
           let startCol = data[2].intValue,
           let chunk = data[3].arrayValue?.compactMap({ arg -> UUpdate? in
             guard let argArray = arg.arrayValue else { return nil }
             var uupdate = UUpdate(string: "", attrId: nil, repeats: nil)
 
-            if argArray.count > 0, let str = arg[0]?.stringValue { uupdate.string = str }
-            if argArray.count > 1, let attrId = arg[1]?.intValue { uupdate.attrId = attrId }
-            if argArray.count > 2, let repeats = arg[2]?.intValue { uupdate.repeats = repeats }
+            if argArray.count > 0, let str = argArray[0].stringValue {
+              uupdate.string = str
+              uupdate.utf16chars = Array(str.utf16)
+            }
+            if argArray.count > 1 { uupdate.attrId = argArray[1].intValue }
+            if argArray.count > 2 { uupdate.repeats = argArray[2].intValue }
 
             return uupdate
           }),
           // wrap is informational, not required for correct functionality
-          let _ /* wrap */ = data[4].boolValue
+          data[4].boolValue != nil // wrap
     else {
-      self.bridgeLogger.error("Could not convert \(data)")
+      self.logger.error("Could not convert \(data)")
       return Int.max
     }
 
-    #if TRACE
-      self.bridgeLogger.debug(
-        "row: \(row), startCol: \(startCol), endCol: \(endCol), " +
-          "chunk: \(chunk)"
-      )
-    #endif
-
     let endCol = self.ugrid.updateNu(row: row, startCol: startCol, chunk: chunk)
+    dlog.trace("row: \(row), startCol: \(startCol), endCol: \(endCol), chunk: \(chunk)")
+
     if chunk.count > 0 {
       if row == self.ugrid.markedInfo?.position.row {
         self.regionsToFlush.append(Region(
@@ -425,7 +384,7 @@ extension NvimView {
   }
 
   private func doGoto(position: Position, textPosition: Position) -> Int? {
-    self.bridgeLogger.debug(position)
+    dlog.debug(position)
 
     var rowStart: Int?
     if var markedInfo = self.ugrid.popMarkedInfo() {
@@ -451,12 +410,12 @@ extension NvimView {
       )
     }
 
-    self.eventsSubject.onNext(.cursor(textPosition))
+    self.delegate?.nextEvent(.cursor(textPosition))
     return rowStart
   }
 
   private func doScrollNu(_ array: [Int]) -> Int {
-    self.bridgeLogger.trace("[grid, top, bot, left, right, rows, cols] = \(array)")
+    dlog.trace("[grid, top, bot, left, right, rows, cols] = \(array)")
 
     let (_ /* grid */, top, bottom, left, right, rows, cols)
       = (array[0], array[1], array[2] - 1, array[3], array[4] - 1, array[5], array[6])
@@ -468,7 +427,7 @@ extension NvimView {
 
     self.ugrid.scroll(region: scrollRegion, rows: rows, cols: cols)
     self.regionsToFlush.append(scrollRegion)
-    self.eventsSubject.onNext(.scroll)
+    self.delegate?.nextEvent(.scroll)
 
     return min(0, top)
   }
@@ -477,7 +436,7 @@ extension NvimView {
     // Exit from Insert mode, save ime used in Insert mode.
     if case self.lastMode = CursorModeShape.insert, case self.mode = CursorModeShape.normal {
       self.lastImSource = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-      self.bridgeLogger.debug("lastImSource id: \(lastImSource.id), source: \(lastImSource)")
+      dlog.debug("lastImSource id: \(lastImSource.id), source: \(lastImSource)")
 
       if self.activateAsciiImInNormalMode { TISSelectInputSource(self.asciiImSource) }
       return
@@ -494,65 +453,67 @@ extension NvimView {
   }
 
   private func bell() {
-    self.bridgeLogger.debug()
+    dlog.debug()
     NSSound.beep()
   }
 
   private func cwdChanged(_ value: MessagePackValue) {
     guard let cwd = value.stringValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
 
-    self.bridgeLogger.debug(cwd)
+    dlog.debug(cwd)
     self._cwd = URL(fileURLWithPath: cwd)
-    self.eventsSubject.onNext(.cwdChanged)
+    Task { self.tabBar?.cwd = cwd }
+    self.delegate?.nextEvent(.cwdChanged)
   }
 
   private func colorSchemeChanged(_ value: MessagePackValue) {
+    dlog.debug("color scheme changed before: \(value)")
+
     guard let values = MessagePackUtils.array(
-      from: value, ofSize: 7, conversion: { $0.intValue }
+      from: value, ofSize: 11, conversion: { $0.intValue }
     ) else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert theme from \(value)")
       return
     }
 
+    dlog.debug("color scheme changed: \(values)")
+
     let theme = Theme(values)
-    self.bridgeLogger.debug(theme)
+    dlog.debug(theme)
 
     self.theme = theme
-    self.eventsSubject.onNext(.colorschemeChanged(theme))
+    self.delegate?.nextEvent(.colorschemeChanged(theme))
   }
 
   private func setDirty(with value: MessagePackValue) {
     guard let dirty = value.intValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
 
-    self.bridgeLogger.debug(dirty)
-    self.eventsSubject.onNext(.setDirtyStatus(dirty == 1))
+    dlog.debug(dirty)
+    self.delegate?.nextEvent(.setDirtyStatus(dirty == 1))
   }
 
   private func setAttr(with value: MessagePackValue) {
     guard let array = value.arrayValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
     guard array.count == 4 else {
-      self.bridgeLogger.error("Could not convert; wrong count \(value)")
+      self.logger.error("Could not convert; wrong count \(value)")
       return
     }
 
     guard let id = array[0].intValue,
           let rgb_dict = array[1].dictionaryValue,
-          let _ /* cterm_dict */ = array[2].dictionaryValue,
-          let _ /* info */ = array[3].arrayValue
+          array[2].dictionaryValue != nil, // cterm_dict
+          array[3].arrayValue != nil // info
     else {
-      self.bridgeLogger.error(
-        "Could not get highlight attributes from " +
-          "\(value)"
-      )
+      self.logger.error("Could not get highlight attributes from \(value)")
       return
     }
 
@@ -575,7 +536,7 @@ extension NvimView {
       // self.cellAttributesCollection.defaultAttributes
     )
 
-    self.bridgeLogger.debug("AttrId: \(id): \(attrs)")
+    dlog.debug("AttrId: \(id): \(attrs)")
 
     // FIXME: seems to not work well unless not async
     self.cellAttributesCollection.set(attributes: attrs, for: id)
@@ -583,24 +544,21 @@ extension NvimView {
 
   private func defaultColors(with value: MessagePackValue) {
     guard let array = value.arrayValue else {
-      self.bridgeLogger.error("Could not convert \(value)")
+      self.logger.error("Could not convert \(value)")
       return
     }
     guard array.count == 5 else {
-      self.bridgeLogger.error("Could not convert; wrong count \(value)")
+      self.logger.error("Could not convert; wrong count \(value)")
       return
     }
 
     guard let rgb_fg = array[0].intValue,
           let rgb_bg = array[1].intValue,
           let rgb_sp = array[2].intValue,
-          let _ /* cterm_fg */ = array[3].intValue,
-          let _ /* cterm_bg */ = array[4].intValue
+          array[3].intValue != nil, // cterm_fg
+          array[4].intValue != nil // cterm_bg
     else {
-      self.bridgeLogger.error(
-        "Could not get default colors from " +
-          "\(value)"
-      )
+      self.logger.error("Could not get default colors from \(value)")
       return
     }
 
@@ -613,49 +571,47 @@ extension NvimView {
       attributes: attrs,
       for: CellAttributesCollection.defaultAttributesId
     )
-    self.layer?.backgroundColor = ColorUtils.cgColorIgnoringAlpha(
-      attrs.background
-    )
+    self.updateLayerBackgroundColor()
   }
 
   private func updateMenu() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func busyStart() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func busyStop() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func mouseOn() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func mouseOff() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func visualBell() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func suspend() {
-    self.bridgeLogger.debug()
+    dlog.debug()
   }
 
   private func tablineUpdate(_ args: [MessagePackValue]) {
     guard args.count >= 2,
-          let curTab = RxNeovimApi.Tabpage(args[0]),
+          let curTab = NvimApi.Tabpage(args[0]),
           let tabsValue = args[1].arrayValue else { return }
 
     self.tabEntries = tabsValue.compactMap { dictValue in
       guard let dict = dictValue.dictionaryValue,
             let name = dict[.string("name")]?.stringValue,
             let tabpageValue = dict[.string("tab")],
-            let tabpage = RxNeovimApi.Tabpage(tabpageValue) else { return nil }
+            let tabpage = NvimApi.Tabpage(tabpageValue) else { return nil }
 
       return TabEntry(title: name, isSelected: tabpage == curTab, tabpage: tabpage)
     }
@@ -688,53 +644,29 @@ extension NvimView {
      */
   }
 
-  private func bufferWritten(_ handle: Int) {
-    self
-      .currentBuffer()
-      .flatMap { curBuf -> Single<NvimView.Buffer> in
-        self.neoVimBuffer(
-          for: RxNeovimApi.Buffer(handle), currentBuffer: curBuf.apiBuffer
-        )
-      }
-      .subscribe(onSuccess: { [weak self] in
-        self?.eventsSubject.onNext(.bufferWritten($0))
-        self?.updateTouchBarTab()
-      }, onFailure: { [weak self] error in
-        self?.bridgeLogger.error("Could not get the buffer \(handle): \(error)")
-        self?.eventsSubject.onNext(
-          .apiError(msg: "Could not get the buffer \(handle).", cause: error)
-        )
-      })
-      .disposed(by: self.disposeBag)
+  private func bufferWritten(_ handle: Int) async {
+    let curBuf = await self.currentBuffer()
+    guard let buf = await self.neoVimBuffer(for: .init(handle), currentBuffer: curBuf?.apiBuffer)
+    else { return }
+    self.delegate?.nextEvent(.bufferWritten(buf))
+    await self.updateTouchBarTab()
   }
 
-  private func newCurrentBuffer(_ handle: Int) {
-    self
-      .currentBuffer()
-      .filter { $0.apiBuffer.handle == handle }
-      .subscribe(onSuccess: { [weak self] in
-        self?.eventsSubject.onNext(.newCurrentBuffer($0))
-        self?.updateTouchBarTab()
-      }, onError: { [weak self] error in
-        self?.bridgeLogger.error("Could not get the current buffer: \(error)")
-        self?.eventsSubject.onNext(
-          .apiError(msg: "Could not get the current buffer.", cause: error)
-        )
-      })
-      .disposed(by: self.disposeBag)
+  private func newCurrentBuffer(_ handle: Int) async {
+    guard let curBuf = await self.currentBuffer(),
+          curBuf.apiBuffer.handle == handle else { return }
+
+    await self.updateTouchBarTab()
+    self.delegate?.nextEvent(.newCurrentBuffer(curBuf))
   }
 
-  private func bufferListChanged() {
-    self.eventsSubject.onNext(.bufferListChanged)
-    self.updateTouchBarCurrentBuffer()
+  private func bufferListChanged() async {
+    self.delegate?.nextEvent(.bufferListChanged)
+    await self.updateTouchBarCurrentBuffer()
   }
 
-  func focusGained(_ gained: Bool) -> Completable {
-    self.api.uiSetFocus(gained: gained)
-  }
-
-  private func quit() -> Completable {
-    self.bridge.quit()
+  func focusGained(_ gained: Bool) async {
+    await self.api.nvimUiSetFocus(gained: gained).cauterize()
   }
 }
 
@@ -752,11 +684,11 @@ extension TISInputSource {
     }
   }
 
+  // swiftlint:disable force_cast
   var id: String { self.getProperty(kTISPropertyInputSourceID) as! String }
   var name: String { self.getProperty(kTISPropertyLocalizedName) as! String }
   var category: String { self.getProperty(kTISPropertyInputSourceCategory) as! String }
   var isSelectable: Bool { self.getProperty(kTISPropertyInputSourceIsSelectCapable) as! Bool }
   var sourceLanguages: [String] { self.getProperty(kTISPropertyInputSourceLanguages) as! [String] }
+  // swiftlint:enable force_cast
 }
-
-private let gui = DispatchQueue.main

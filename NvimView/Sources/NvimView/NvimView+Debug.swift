@@ -7,14 +7,20 @@ import Cocoa
 
 public extension NvimView {
   @IBAction func debug1(_: Any?) {
-    do { try self.ugrid.dump() } catch { self.log.error("Could not dump UGrid: \(error)") }
+    do {
+      try self.ugrid.dumpToJson()
+      self.logger.debug("dumped ugrid")
+    } catch {
+      self.logger.error("Could not dump UGrid: \(error)")
+    }
   }
 
   @IBAction func debug2(_: Any?) {
-    self.log.debug("Nothing yet")
+    self.logger.error("nothing yet")
   }
 
-  internal func draw(cellGridIn context: CGContext) {
+  #if DEBUG
+  func draw(cellGridIn context: CGContext) {
     context.saveGState()
     defer { context.restoreGState() }
 
@@ -67,4 +73,5 @@ public extension NvimView {
 
     context.fill(lines)
   }
+  #endif
 }

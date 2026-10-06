@@ -9,14 +9,12 @@ final class AdvancedPrefReducer: ReducerType {
   typealias StateType = AppState
   typealias ActionType = AdvancedPref.Action
 
-  func typedReduce(_ pair: ReduceTuple) -> ReduceTuple {
-    var state = pair.state
+  func typedReduce(_ tuple: ReduceTuple<StateType, ActionType>)
+    -> ReduceTuple<StateType, ActionType>
+  {
+    var state = tuple.state
 
-    switch pair.action {
-    case let .setUseLiveResize(value):
-      state.mainWindowTemplate.useLiveResize = value
-      state.mainWindows.keys.forEach { state.mainWindows[$0]?.useLiveResize = value }
-
+    switch tuple.action {
     case let .setUseInteractiveZsh(value):
       state.mainWindowTemplate.useInteractiveZsh = value
 
@@ -25,8 +23,14 @@ final class AdvancedPrefReducer: ReducerType {
 
     case let .setNvimBinary(value):
       state.mainWindowTemplate.nvimBinary = value
+
+    case let .setNvimAppName(value):
+      state.nvimAppName = value
+
+    case let .setConnectionMode(value):
+      state.mainWindowTemplate.connectionMode = value
     }
 
-    return (state, pair.action, true)
+    return ReduceTuple(state: state, action: tuple.action, modified: true)
   }
 }

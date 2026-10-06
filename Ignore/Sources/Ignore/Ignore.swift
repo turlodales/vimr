@@ -12,7 +12,7 @@ public final class Ignore {
     let urls = [
       GitUtils.gitDirInfoExcludeUrl(base: base, gitRoot: gitRoot),
       GitUtils.globalGitignoreFileUrl(),
-    ].compactMap { $0 }
+    ].compactMap(\.self)
 
     if urls.isEmpty { return nil }
 
@@ -106,8 +106,8 @@ public final class Ignore {
 
     if isExcluded { return true }
 
-    for ignore in self.remainingDisallowIgnores {
-      if ignore.matches(url) { return true }
+    if self.remainingDisallowIgnores.contains(where: { $0.matches(url) }) {
+      return true
     }
 
     return false
@@ -117,4 +117,6 @@ public final class Ignore {
   let remainingDisallowIgnores: ArraySlice<Filter>
 }
 
-private let fm = FileManager.default
+// FileManager is thread-safe:
+// https://developer.apple.com/documentation/foundation/filemanager#1651181
+private nonisolated(unsafe) let fm = FileManager.default

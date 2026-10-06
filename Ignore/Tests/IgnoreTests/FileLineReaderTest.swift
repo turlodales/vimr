@@ -1,9 +1,9 @@
 /// Tae Won Ha - http://taewon.de - @hataewon
 /// See LICENSE
 
-@testable import Ignore
 import Nimble
 import XCTest
+@testable import Ignore
 
 private struct TestSpec {
   var fileName: String
@@ -25,7 +25,7 @@ private let specs = [
 
 final class FileLineReaderTest: XCTestCase {
   func testSpecsDefaultBuffer() {
-    specs.forEach { spec in
+    for spec in specs {
       let url = Bundle.module.url(
         forResource: spec.fileName,
         withExtension: "txt",
@@ -39,7 +39,7 @@ final class FileLineReaderTest: XCTestCase {
   }
 
   func testSpecsSmallBuffer() {
-    specs.forEach { spec in
+    for spec in specs {
       let url = Bundle.module.url(
         forResource: spec.fileName,
         withExtension: "txt",
@@ -53,7 +53,7 @@ final class FileLineReaderTest: XCTestCase {
   }
 
   func testSpecsBigBuffer() {
-    specs.forEach { spec in
+    for spec in specs {
       let url = Bundle.module.url(
         forResource: spec.fileName,
         withExtension: "txt",

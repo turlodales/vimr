@@ -9,7 +9,6 @@ import CommonsObjC
 import DictionaryCoding
 import os
 import PureLayout
-import RxSwift
 import Sparkle
 import UserNotifications
 
@@ -28,6 +27,7 @@ final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
 }
 
 @main
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   struct OpenConfig {
     var urls: [URL]
@@ -35,8 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     var cliPipePath: String?
     var nvimArgs: [String]?
-    var envDict: [String: String]?
+    var additionalEnvs: [String: String]
     var line: Int?
+    /// When set, connect to this running neovim socket instead of launching a new one.
+    var remoteSocketPath: String?
   }
 
   enum Action {
@@ -45,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     case preferences
   }
+
+  let uuid = UUID()
+
+  @IBOutlet var customConfigWindow: NSWindow!
 
   override init() {
     let baseServerUrl = URL(string: "http://localhost:\(NetUtils.openPort())")!
@@ -63,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     initialAppState.mainWindowTemplate.htmlPreview.server = nil
 
-    self.context = Context(baseServerUrl: baseServerUrl, state: initialAppState)
+    self.context = ReduxContext(baseServerUrl: baseServerUrl, state: initialAppState)
     self.emit = self.context.actionEmitter.typedEmit()
 
     self.openNewMainWindowOnLaunch = initialAppState.openNewMainWindowOnLaunch
@@ -81,25 +87,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UNUserNotificationCenter.current().delegate = self
   }
 
+  // awakeFromNib is not @MainActor isolated
+  // https://www.massicotte.org/awakefromnib
   override func awakeFromNib() {
     super.awakeFromNib()
 
-    let source = self.context.stateSource
+    MainActor.assumeIsolated {
+      // We want to build the menu items tree at some point, eg in the init() of
+      // ShortcutsPref. We have to do that *after* the MainMenu.xib is loaded.
+      // Therefore, we use optional var for the self.uiRoot. Ugly, but, well...
+      self.uiRoot = UiRoot(context: self.context, state: self.context.state)
 
-    // We want to build the menu items tree at some point, eg in the init() of
-    // ShortcutsPref. We have to do that *after* the MainMenu.xib is loaded.
-    // Therefore, we use optional var for the self.uiRoot. Ugly, but, well...
-    self.uiRoot = UiRoot(
-      source: source,
-      emitter: self.context.actionEmitter,
-      state: self.context.state
-    )
+      self.setupCustomConfigWindow()
 
-    source
-      .observe(on: MainScheduler.instance)
-      .subscribe(onNext: { appState in
+      self.context.subscribe(uuid: self.uuid) { appState in
         self.hasMainWindows = !appState.mainWindows.isEmpty
-        self.hasDirtyWindows = appState.mainWindows.values.reduce(false) { $1.isDirty ? true : $0 }
+        self.hasDirtyWindows = appState.mainWindows.values.contains(where: { $0.isDirty })
 
         self.openNewMainWindowOnLaunch = appState.openNewMainWindowOnLaunch
         self.openNewMainWindowOnReactivation = appState.openNewMainWindowOnReactivation
@@ -109,11 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         if appState.quit { NSApp.terminate(self) }
-      })
-      .disposed(by: self.disposeBag)
+      }
+    }
   }
 
-  private let context: Context
+  private let context: ReduxContext
   private let emit: (Action) -> Void
 
   private var uiRoot: UiRoot?
@@ -124,14 +127,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var openNewMainWindowOnLaunch: Bool
   private var openNewMainWindowOnReactivation: Bool
 
-  private let disposeBag = DisposeBag()
-
   private var launching = true
 
   private let updaterController: SPUStandardUpdaterController
   private let updaterDelegate = UpdaterDelegate()
 
-  private let log = OSLog(subsystem: Defs.loggerSubsystem, category: Defs.LoggerCategory.general)
+  private let logger = Logger(
+    subsystem: Defs.loggerSubsystem,
+    category: Defs.LoggerCategory.general
+  )
+
+  private var customConfigTextField = NSTextField(forAutoLayout: ())
+
+  private func setupCustomConfigWindow() {
+    // We know that the window and its contentView exist
+    let win = self.customConfigWindow!
+    let view = win.contentView!
+
+    let title = self.titleTextField(title: "NVIM_APPNAME:")
+    let location = self.customConfigTextField
+    let info = self.infoTextField(markdown: """
+    Nvim will be started with the config directory `$HOME/.config/<NVIM_APPNAME>`.
+    See [Nvim's documentation](https://neovim.io/doc/user/starting.html#%24NVIM_APPNAME)
+    for more details.
+    """)
+
+    let okButton = NSButton(forAutoLayout: ())
+    okButton.title = "OK"
+    okButton.keyEquivalent = "\r"
+    okButton.bezelStyle = .rounded
+    okButton.target = self
+    okButton.action = #selector(customConfigOkAction(_:))
+
+    let cancelButton = NSButton(forAutoLayout: ())
+    cancelButton.title = "Cancel"
+    cancelButton.keyEquivalent = "\u{1b}" // ESC
+    cancelButton.bezelStyle = .rounded
+    cancelButton.target = self
+    cancelButton.action = #selector(customConfigCancelAction(_:))
+
+    view.addSubview(title)
+    view.addSubview(location)
+    view.addSubview(info)
+    view.addSubview(okButton)
+    view.addSubview(cancelButton)
+
+    title.autoPinEdge(toSuperviewEdge: .top, withInset: 18)
+    title.autoPinEdge(toSuperviewEdge: .left, withInset: 18)
+
+    location.autoPinEdge(.left, to: .right, of: title, withOffset: 5)
+    location.autoPinEdge(toSuperviewEdge: .right, withInset: 18)
+    location.autoSetDimension(.width, toSize: 300)
+    location.autoAlignAxis(.baseline, toSameAxisOf: title)
+
+    info.autoPinEdge(.left, to: .left, of: location)
+    info.autoPinEdge(.top, to: .bottom, of: location, withOffset: 5)
+    info.autoPinEdge(toSuperviewEdge: .right, withInset: 18)
+
+    okButton.autoPinEdge(.top, to: .bottom, of: info, withOffset: 18)
+    okButton.autoPinEdge(toSuperviewEdge: .bottom, withInset: 18)
+    okButton.autoPinEdge(toSuperviewEdge: .right, withInset: 18)
+
+    cancelButton.autoPinEdge(.top, to: .top, of: okButton)
+    cancelButton.autoPinEdge(.right, to: .left, of: okButton, withOffset: -8)
+  }
+
+  private func titleTextField(title: String) -> NSTextField {
+    let field = NSTextField.defaultTitleTextField()
+    field.alignment = .right
+    field.stringValue = title
+    return field
+  }
+
+  func infoTextField(markdown: String) -> NSTextField {
+    let field = NSTextField(forAutoLayout: ())
+    field.backgroundColor = NSColor.clear
+    field.isEditable = false
+    field.isBordered = false
+    field.usesSingleLineMode = false
+
+    // both are needed, otherwise hyperlink won't accept mousedown
+    field.isSelectable = true
+    field.allowsEditingTextAttributes = true
+
+    field.attributedStringValue = NSAttributedString.infoLabel(markdown: markdown)
+
+    return field
+  }
 }
 
 // MARK: - NSApplicationDelegate
@@ -154,13 +236,27 @@ extension AppDelegate {
 
     self.updaterController.startUpdater()
 
+    // Add "Connect to Running Neovim..." menu item to File menu
+    if let fileMenu = NSApp.mainMenu?.items.first(where: { $0.title == "File" })?.submenu {
+      let connectItem = NSMenuItem(
+        title: "Connect to Running Neovim...",
+        action: #selector(AppDelegate.connectToRunningNvim(_:)),
+        keyEquivalent: ""
+      )
+      connectItem.keyEquivalentModifierMask = [.command, .shift, .option]
+      connectItem.keyEquivalent = "n"
+      // Insert after "New with Custom Config Location" (index 1), or at position 2
+      let insertIndex = min(2, fileMenu.items.count)
+      fileMenu.insertItem(connectItem, at: insertIndex)
+    }
+
     #if DEBUG
-      NSApp.mainMenu?.items.first { $0.identifier == debugMenuItemIdentifier }?.isHidden = false
+    NSApp.mainMenu?.items.first { $0.identifier == debugMenuItemIdentifier }?.isHidden = false
     #else
-      // defaults write com.qvacua.VimR enable-debug-menu 1
-      if UserDefaults.standard.bool(forKey: "enable-debug-menu") {
-        NSApp.mainMenu?.items.first { $0.identifier == debugMenuItemIdentifier }?.isHidden = false
-      }
+    // defaults write com.qvacua.VimR enable-debug-menu 1
+    if UserDefaults.standard.bool(forKey: "enable-debug-menu") {
+      NSApp.mainMenu?.items.first { $0.identifier == debugMenuItemIdentifier }?.isHidden = false
+    }
     #endif
   }
 
@@ -183,49 +279,71 @@ extension AppDelegate {
   func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
     self.context.savePrefs()
 
-    guard self.hasMainWindows else {
-      self.uiRoot?.prepareQuit()
-      return .terminateNow
-    }
-
-    // check first whether there are blocked nvim instances, if so, abort and inform the user
-    if self.uiRoot?.hasBlockedWindows() == true {
-      let alert = NSAlert()
-      alert.messageText = "There are windows waiting for your input."
-      alert.alertStyle = .informational
-      alert.runModal()
-      return .terminateCancel
-    }
-
-    if self.hasDirtyWindows {
-      let alert = NSAlert()
-      let cancelButton = alert.addButton(withTitle: "Cancel")
-      let discardAndQuitButton = alert.addButton(withTitle: "Discard and Quit")
-      cancelButton.keyEquivalent = "\u{1b}"
-      alert.messageText = "There are windows with unsaved buffers!"
-      alert.alertStyle = .warning
-      discardAndQuitButton.keyEquivalentModifierMask = .command
-      discardAndQuitButton.keyEquivalent = "d"
-
-      if alert.runModal() == .alertSecondButtonReturn {
-        self.updateMainWindowTemplateBeforeQuitting()
-        self.uiRoot?.prepareQuit()
-        return .terminateNow
+    Task {
+      guard self.hasMainWindows else {
+        await self.uiRoot?.prepareQuit()
+        NSApplication.shared.reply(toApplicationShouldTerminate: true)
+        return
       }
 
-      return .terminateCancel
+      if await self.uiRoot?.hasBlockedWindows() == true {
+        let alert = NSAlert()
+        alert.messageText = "There are windows waiting for your input."
+        alert.alertStyle = .informational
+        alert.runModal()
+
+        NSApplication.shared.reply(toApplicationShouldTerminate: false)
+        return
+      }
+
+      if self.hasDirtyWindows {
+        let alert = NSAlert()
+        let cancelButton = alert.addButton(withTitle: "Cancel")
+        let discardAndQuitButton = alert.addButton(withTitle: "Discard and Quit")
+        cancelButton.keyEquivalent = "\u{1b}"
+        alert.messageText = "There are windows with unsaved buffers!"
+        alert.alertStyle = .warning
+        discardAndQuitButton.keyEquivalentModifierMask = .command
+        discardAndQuitButton.keyEquivalent = "d"
+
+        if alert.runModal() == .alertSecondButtonReturn {
+          self.updateMainWindowTemplateBeforeQuitting()
+          await self.uiRoot?.prepareQuit()
+
+          NSApplication.shared.reply(toApplicationShouldTerminate: true)
+          return
+        }
+
+        NSApplication.shared.reply(toApplicationShouldTerminate: false)
+        return
+      }
+
+      self.updateMainWindowTemplateBeforeQuitting()
+      await self.uiRoot?.prepareQuit()
+
+      NSApplication.shared.reply(toApplicationShouldTerminate: true)
     }
 
-    self.updateMainWindowTemplateBeforeQuitting()
-    self.uiRoot?.prepareQuit()
-    return .terminateNow
+    return .terminateLater
+  }
+
+  func applicationDockMenu(_: NSApplication) -> NSMenu? {
+    let menu = NSMenu()
+    let newWindowItem = NSMenuItem(
+      title: "New Window",
+      action: #selector(AppDelegate.newDocument(_:)),
+      keyEquivalent: ""
+    )
+    newWindowItem.target = self
+    menu.addItem(newWindowItem)
+    return menu
   }
 
   // For drag & dropping files on the App icon.
   func application(_ sender: NSApplication, openFiles filenames: [String]) {
     let urls = filenames.map { URL(fileURLWithPath: $0) }
     let config = OpenConfig(
-      urls: urls, cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil, envDict: nil,
+      urls: urls, cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil, additionalEnvs: [:],
       line: nil
     )
     switch self.context.state.openFilesFromApplicationsAction {
@@ -239,9 +357,6 @@ extension AppDelegate {
   }
 
   private func updateMainWindowTemplateBeforeQuitting() {
-    guard let curMainWindow = self.context.state.currentMainWindow else { return }
-
-    self.context.state.mainWindowTemplate = curMainWindow
     self.context.savePrefs()
   }
 }
@@ -289,22 +404,22 @@ extension AppDelegate {
       return
     }
 
-    let envDict: [String: String]?
+    let additionalEnvs: [String: String]
     if let envPath = queryParam(envPathPrefix, from: rawParams, transforming: identity).first {
-      envDict = self.stringDict(from: URL(fileURLWithPath: envPath))
+      additionalEnvs = self.stringDict(from: URL(fileURLWithPath: envPath)) ?? [:]
       if FileManager.default.fileExists(atPath: envPath) {
         do {
           try FileManager.default.removeItem(atPath: envPath)
         } catch {
-          self.log.error(error.localizedDescription)
+          self.logger.error(error.localizedDescription)
         }
       }
     } else {
-      envDict = nil
+      additionalEnvs = [:]
     }
 
     let line = self.queryParam(linePrefix, from: rawParams, transforming: { Int($0) })
-      .compactMap { $0 }.first
+      .compactMap(\.self).first
     let urls = self.queryParam(
       filePrefix,
       from: rawParams,
@@ -333,7 +448,7 @@ extension AppDelegate {
         cwd: cwd,
         cliPipePath: pipePath,
         nvimArgs: nil,
-        envDict: envDict,
+        additionalEnvs: additionalEnvs,
         line: line
       )
       self.emit(.newMainWindow(config: config))
@@ -344,19 +459,19 @@ extension AppDelegate {
         cwd: cwd,
         cliPipePath: pipePath,
         nvimArgs: nil,
-        envDict: envDict,
+        additionalEnvs: additionalEnvs,
         line: line
       )
       self.emit(.openInKeyWindow(config: config))
 
     case .separateWindows:
-      urls.forEach {
+      for url in urls {
         let config = OpenConfig(
-          urls: [$0],
+          urls: [url],
           cwd: cwd,
           cliPipePath: pipePath,
           nvimArgs: nil,
-          envDict: nil,
+          additionalEnvs: [:],
           line: line
         )
         self.emit(.newMainWindow(config: config))
@@ -372,8 +487,25 @@ extension AppDelegate {
           from: rawParams,
           transforming: identity
         ),
-        envDict: envDict,
+        additionalEnvs: additionalEnvs,
         line: line
+      )
+      self.emit(.newMainWindow(config: config))
+
+    case .connectRemote:
+      guard let remoteAddress = self.queryParam(
+        remoteAddressPrefix,
+        from: rawParams,
+        transforming: identity
+      ).first else { return }
+      let config = OpenConfig(
+        urls: [],
+        cwd: cwd,
+        cliPipePath: pipePath,
+        nvimArgs: nil,
+        additionalEnvs: [:],
+        line: nil,
+        remoteSocketPath: remoteAddress
       )
       self.emit(.newMainWindow(config: config))
     }
@@ -387,7 +519,7 @@ extension AppDelegate {
     do {
       return try JSONSerialization.jsonObject(with: data) as? [String: String]
     } catch {
-      self.log.error(error.localizedDescription)
+      self.logger.error(error.localizedDescription)
     }
 
     return nil
@@ -414,7 +546,70 @@ extension AppDelegate {
 
   @IBAction func newDocument(_: Any?) {
     let config = OpenConfig(
-      urls: [], cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil, envDict: nil, line: nil
+      urls: [], cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil, additionalEnvs: [:],
+      line: nil
+    )
+    self.emit(.newMainWindow(config: config))
+  }
+
+  @IBAction func newDocumentWithCustomConfigLocation(_: Any?) {
+    NSApp.runModal(for: self.customConfigWindow)
+  }
+
+  @objc private func customConfigOkAction(_: Any?) {
+    let appName = self.customConfigTextField.stringValue.trimmingCharacters(in: .whitespaces)
+    guard !appName.isEmpty else {
+      self.customConfigTextField.layer?.borderColor = NSColor.systemRed.cgColor
+      self.customConfigTextField.layer?.borderWidth = 3.0
+      return
+    }
+
+    self.stopCustomConfigWindow()
+
+    self.emit(.newMainWindow(config: OpenConfig(
+      urls: [], cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil,
+      additionalEnvs: ["NVIM_APPNAME": appName],
+      line: nil
+    )))
+  }
+  
+  private func stopCustomConfigWindow() {
+    NSApp.stopModal()
+    self.customConfigWindow.orderOut(nil)
+    self.customConfigTextField.stringValue = ""
+    self.customConfigTextField.layer?.borderWidth = 0
+
+  }
+
+  @objc private func customConfigCancelAction(_: Any?) {
+    self.stopCustomConfigWindow()
+  }
+
+  /// Shows a dialog for the user to enter a socket path, then opens a new window
+  /// connected to that running neovim instance.
+  @IBAction func connectToRunningNvim(_: Any?) {
+    let alert = NSAlert()
+    alert.messageText = "Connect to Running Neovim"
+    alert.informativeText = "Enter the Unix socket path or TCP address (host:port) of a running neovim instance.\n"
+      + "Start neovim with: nvim --listen /tmp/nvim.sock --headless\n"
+      + "or for TCP: nvim --listen 0.0.0.0:6666 --headless"
+    alert.alertStyle = .informational
+    alert.addButton(withTitle: "Connect")
+    alert.addButton(withTitle: "Cancel")
+
+    let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24))
+    input.placeholderString = "/tmp/nvim.sock  or  192.168.1.10:6666"
+    alert.accessoryView = input
+
+    let response = alert.runModal()
+    guard response == .alertFirstButtonReturn else { return }
+
+    let socketPath = input.stringValue.trimmingCharacters(in: .whitespaces)
+    guard !socketPath.isEmpty else { return }
+
+    let config = OpenConfig(
+      urls: [], cwd: FileUtils.userHomeUrl, cliPipePath: nil, nvimArgs: nil,
+      additionalEnvs: [:], line: nil, remoteSocketPath: socketPath
     )
     self.emit(.newMainWindow(config: config))
   }
@@ -435,10 +630,16 @@ extension AppDelegate {
       let commonParentUrl = FileUtils.commonParent(of: urls)
 
       let config = OpenConfig(
-        urls: urls, cwd: commonParentUrl, cliPipePath: nil, nvimArgs: nil, envDict: nil, line: nil
+        urls: urls, cwd: commonParentUrl, cliPipePath: nil, nvimArgs: nil, additionalEnvs: [:],
+        line: nil
       )
       self.emit(.newMainWindow(config: config))
     }
+  }
+
+  /// Open a new main window. Called from RPC event handlers in other files.
+  func openNewMainWindow(config: OpenConfig) {
+    self.emit(.newMainWindow(config: config))
   }
 }
 
@@ -458,6 +659,7 @@ private enum VimRUrlAction: String {
   case newWindow = "open-in-new-window"
   case separateWindows = "open-in-separate-windows"
   case nvim
+  case connectRemote = "connect-to-remote"
 }
 
 // Keep in sync with QueryParamKey in the `vimr` Python script.
@@ -468,3 +670,4 @@ private let pipePathPrefix = "pipe-path="
 private let waitPrefix = "wait="
 private let envPathPrefix = "env-path="
 private let linePrefix = "line="
+private let remoteAddressPrefix = "remote-address="

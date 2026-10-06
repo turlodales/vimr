@@ -1,16 +1,17 @@
-// swift-tools-version:5.9
+// swift-tools-version: 6.0
 
 import PackageDescription
 
 let package = Package(
   name: "Workspace",
-  platforms: [.macOS(.v12)],
+  platforms: [.macOS(.v14)],
   products: [
     .library(name: "Workspace", targets: ["Workspace"]),
   ],
   dependencies: [
     .package(url: "https://github.com/PureLayout/PureLayout", from: "3.1.9"),
-    .package(url: "https://github.com/qvacua/material-icons", from: "0.1.0"),
+    .package(url: "https://github.com/qvacua/material-icons", from: "0.2.0"),
+    .package(url: "https://github.com/SimplyDanny/SwiftLintPlugins", .upToNextMajor(from: "0.62.2")),
     .package(path: "../Commons"),
   ],
   targets: [
@@ -20,11 +21,8 @@ let package = Package(
         "PureLayout",
         .product(name: "MaterialIcons", package: "material-icons"),
         "Commons",
-      ]
-    ),
-    .testTarget(
-      name: "WorkspaceTests",
-      dependencies: ["Workspace"]
+      ],
+      plugins: [.plugin(name: "SwiftLintBuildToolPlugin", package: "SwiftLintPlugins")]
     ),
   ]
 )

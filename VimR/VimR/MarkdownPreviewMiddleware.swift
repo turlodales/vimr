@@ -20,10 +20,12 @@ final class MarkdownPreviewMiddleware {
   class PreviewGenerator {
     init() {
       // We know that the files are there!
+      // swiftlint:disable force_try
       self.template = try! String(contentsOf: Resources.markdownTemplateUrl)
       self.emptyHtmlTemplate = try! String(contentsOf: Resources.emptyHtmlTemplateUrl)
       self.errorHtmlTemplate = try! String(contentsOf: Resources.errorHtmlTemplateUrl)
       self.saveFirstHtmlTemplate = try! String(contentsOf: Resources.saveFirstHtmlTemplateUrl)
+      // swiftlint:enable force_try
 
       self.updateCssOverrides(with: Theme.default)
     }
@@ -61,7 +63,7 @@ final class MarkdownPreviewMiddleware {
           self.previewFiles[uuid] = htmlUrl
         } catch let error as NSError {
           // FIXME: error handling!
-          self.log.error("error while rendering \(buffer) to \(htmlUrl): \(error)")
+          self.logger.error("error while rendering \(buffer) to \(htmlUrl): \(error)")
           return
         }
       }
@@ -101,7 +103,7 @@ final class MarkdownPreviewMiddleware {
     private let template: String
     private var previewFiles = [UUID: URL]()
 
-    private let log = OSLog(
+    private let logger = Logger(
       subsystem: Defs.loggerSubsystem,
       category: Defs.LoggerCategory.middleware
     )
@@ -132,7 +134,7 @@ final class MarkdownPreviewMiddleware {
 
         try sh.run()
 
-        body = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        body = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
       } else {
         let md = try String(contentsOf: bufferUrl)
         let down = Down(markdownString: md)
@@ -190,11 +192,8 @@ final class MarkdownPreviewMiddleware {
 
         let uuidAction = tuple.action
         switch uuidAction.payload {
-        case .newCurrentBuffer: fallthrough
-        case .bufferWritten: fallthrough
-        case .setTheme:
+        case .newCurrentBuffer, .bufferWritten, .setTheme:
           self.generator.apply(result.state, uuid: uuidAction.uuid)
-
         default: return result
         }
 

@@ -11,7 +11,7 @@ final class Typesetter {
   func clearCache() {
     self.ctRunsCache.clear()
   }
-  
+
   func fontGlyphRunsWithLigatures(
     nvimUtf16Cells: [[Unicode.UTF16.CodeUnit]],
     startColumn: Int,
@@ -51,20 +51,27 @@ final class Typesetter {
         }
         // swiftlint:enable force_unwrapping
 
-        var column = -1
-        var columnPosition = 0.0
-        var deltaX = 0.0
+        let offsetX = offset.x
+        let offsetY = offset.y
 
         positions.withUnsafeMutableBufferPointer { positionsPtr in
-          for i in 0..<positionsPtr.count {
-            let newColumn = cellIndices[indices[i]] + startColumn
-            if newColumn != column {
-              columnPosition = offset.x + newColumn.cgf * cellWidth
-              deltaX = columnPosition - positionsPtr[i].x
-              column = newColumn
+          indices.withUnsafeBufferPointer { indicesPtr in
+            cellIndices.withUnsafeBufferPointer { cellIndicesPtr in
+              var column = -1
+              var columnPosition = 0.0
+              var deltaX = 0.0
+
+              for i in 0..<positionsPtr.count {
+                let newColumn = cellIndicesPtr[indicesPtr[i]] + startColumn
+                if newColumn != column {
+                  columnPosition = offsetX + newColumn.cgf * cellWidth
+                  deltaX = columnPosition - positionsPtr[i].x
+                  column = newColumn
+                }
+                positionsPtr[i].x += deltaX
+                positionsPtr[i].y += offsetY
+              }
             }
-            positionsPtr[i].x += deltaX
-            positionsPtr[i].y += offset.y
           }
         }
 
@@ -138,24 +145,25 @@ final class Typesetter {
         }
       }
 
-      return groupRuns.flatMap { $0 }
+      return groupRuns.flatMap(\.self)
     }
 
-    return runs.flatMap { $0 }
+    return runs.flatMap(\.self)
   }
 
   private func ctRuns(from utf16Chars: [Unicode.UTF16.CodeUnit], font: NSFont) -> [CTRun] {
-    if let ctRunsAndFont = self.ctRunsCache.valueForKey(utf16Chars) { return ctRunsAndFont }
+    let str = String(utf16CodeUnits: utf16Chars, count: utf16Chars.count)
+    if let ctRunsAndFont = self.ctRunsCache.valueForKey(str) { return ctRunsAndFont }
 
     let attrStr = NSAttributedString(
-      string: String(utf16CodeUnits: utf16Chars, count: utf16Chars.count),
+      string: str,
       attributes: [.font: font, .ligature: ligatureOption]
     )
 
     let ctLine = CTLineCreateWithAttributedString(attrStr)
     guard let ctRuns = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return [] }
 
-    self.ctRunsCache.set(ctRuns, forKey: utf16Chars)
+    self.ctRunsCache.set(ctRuns, forKey: str)
 
     return ctRuns
   }
@@ -228,33 +236,32 @@ final class Typesetter {
     return result
   }
 
+  // We could combine cellIndices and utf16Chars into one function such that
+  // we have only one pass through nvimUtf16Cells.
+  // According to Instruments, no real benefit, it seems to take even more time: 3% vs. 5%
   private func cellIndices(
     from nvimUtf16Cells: [[Unicode.UTF16.CodeUnit]],
     utf16CharsCount: Int
   ) -> [Int] {
-    nvimUtf16Cells.withUnsafeBufferPointer { pointer -> [Int] in
-      var cellIndices = Array(repeating: 0, count: utf16CharsCount)
-      var cellIndex = 0
-      var i = 0
-
-      repeat {
-        if pointer[cellIndex].isEmpty {
-          cellIndex = cellIndex &+ 1
-          continue
+    nvimUtf16Cells.withUnsafeBufferPointer { pointer in
+      Array(unsafeUninitializedCapacity: utf16CharsCount) { buffer, count in
+        var i = 0
+        for cellIndex in 0..<pointer.count {
+          let element = pointer[cellIndex]
+          for _ in 0..<element.count {
+            buffer[i] = cellIndex
+            i += 1
+          }
         }
-
-        for _ in 0..<pointer[cellIndex].count {
-          cellIndices[i] = cellIndex
-          i = i + 1
-        }
-        cellIndex = cellIndex &+ 1
-      } while cellIndex < pointer.count
-
-      return cellIndices
+        count = utf16CharsCount
+      }
     }
   }
 
   private func utf16Chars(from nvimUtf16Cells: [[Unicode.UTF16.CodeUnit]]) -> [UInt16] {
+    // nvimUtf16Cells.flatMap { $0 } gets the job done, but is slower according to Instruments:
+    // 4% vs. 1.5% when scrolling 10K lines
+
     nvimUtf16Cells.withUnsafeBufferPointer { pointer -> [UInt16] in
       let count = pointer.reduce(0) { acc, elem in acc + elem.count }
 
@@ -264,18 +271,18 @@ final class Typesetter {
           let element = pointer[k]
           if element.isEmpty { continue }
 
-          for j in 0..<element.count { resultPtr[i + j] = element[j] }
+          for j in 0..<element.count {
+            resultPtr[i + j] = element[j]
+          }
 
-          i = i + element.count
+          i += element.count
         }
         initCount = count
       }
     }
   }
 
-  private let ctRunsCache = FifoCache<[Unicode.UTF16.CodeUnit], [CTRun]>(count: 5000)
-
-  private let log = OSLog(subsystem: Defs.loggerSubsystem, category: Defs.LoggerCategory.view)
+  private let ctRunsCache = FifoCache<String, [CTRun]>(count: 5000)
 
   private struct NvimUtf16CellsRun {
     var startColumn: Int
@@ -284,4 +291,4 @@ final class Typesetter {
   }
 }
 
-private let ligatureOption = NSNumber(integerLiteral: 1)
+private let ligatureOption: NSNumber = 1

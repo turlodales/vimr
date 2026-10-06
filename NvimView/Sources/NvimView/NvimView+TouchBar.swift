@@ -5,9 +5,7 @@
  */
 
 import Cocoa
-import RxNeovim
-import RxPack
-import RxSwift
+import NvimApi
 
 extension NvimView: NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDelegate {
   override public func makeTouchBar() -> NSTouchBar? {
@@ -60,42 +58,28 @@ extension NvimView: NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDelegate
     return item?.view as? NSScrubber
   }
 
-  func updateTouchBarCurrentBuffer() {
-    self
-      .allTabs()
-      .observe(on: MainScheduler.instance)
-      .subscribe(onSuccess: { [weak self] in
-        self?.tabsCache = $0
+  func updateTouchBarCurrentBuffer() async {
+    guard let allTabs = await self.allTabs() else { return }
+    self.tabsCache = allTabs
 
-        guard let tabsControl = self?.getTabsControl() else { return }
+    guard let tabsControl = self.getTabsControl() else { return }
+    tabsControl.reloadData()
 
-        tabsControl.reloadData()
-
-        let scrubberProportionalLayout = tabsControl.scrubberLayout as! NSScrubberProportionalLayout
-        scrubberProportionalLayout.numberOfVisibleItems = tabsControl
-          .numberOfItems > 0 ? tabsControl.numberOfItems : 1
-        tabsControl.selectedIndex = self?.selectedTabIndex() ?? tabsControl.selectedIndex
-      }, onFailure: { [weak self] error in
-        self?.eventsSubject.onNext(.apiError(msg: "Could not get all tabpages.", cause: error))
-      })
-      .disposed(by: self.disposeBag)
+    // swiftlint:disable:next force_cast
+    let scrubberProportionalLayout = tabsControl.scrubberLayout as! NSScrubberProportionalLayout
+    scrubberProportionalLayout.numberOfVisibleItems = tabsControl
+      .numberOfItems > 0 ? tabsControl.numberOfItems : 1
+    tabsControl.selectedIndex = self.selectedTabIndex()
   }
 
-  func updateTouchBarTab() {
-    self
-      .allTabs()
-      .observe(on: MainScheduler.instance)
-      .subscribe(onSuccess: { [weak self] in
-        self?.tabsCache = $0
+  func updateTouchBarTab() async {
+    guard let allTabs = await self.allTabs() else { return }
+    self.tabsCache = allTabs
 
-        guard let tabsControl = self?.getTabsControl() else { return }
+    guard let tabsControl = self.getTabsControl() else { return }
 
-        tabsControl.reloadData()
-        tabsControl.selectedIndex = self?.selectedTabIndex() ?? tabsControl.selectedIndex
-      }, onFailure: { error in
-        self.eventsSubject.onNext(.apiError(msg: "Could not get all tabpages.", cause: error))
-      })
-      .disposed(by: self.disposeBag)
+    tabsControl.reloadData()
+    tabsControl.selectedIndex = self.selectedTabIndex()
   }
 
   public func numberOfItems(for _: NSScrubber) -> Int { tabsCache.count }
@@ -120,14 +104,9 @@ extension NvimView: NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDelegate
     guard tab.windows.count > 0 else { return }
 
     let window = tab.currentWindow ?? tab.windows[0]
-    self.api
-      .setCurrentWin(window: RxNeovimApi.Window(window.handle))
-      .subscribe(on: self.scheduler)
-      .subscribe(onError: { [weak self] error in
-        self?.eventsSubject
-          .onNext(.apiError(msg: "Could not set current window to \(window.handle).", cause: error))
-      })
-      .disposed(by: self.disposeBag)
+    Task {
+      await self.api.nvimSetCurrentWin(win: .init(window.handle)).cauterize()
+    }
   }
 }
 

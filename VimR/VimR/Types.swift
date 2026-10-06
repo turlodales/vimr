@@ -3,8 +3,15 @@
  * See LICENSE
  */
 
-import Foundation
-import RxSwift
+import Cocoa
+import UserNotifications
+
+extension NSFont: @retroactive @unchecked Sendable {}
+extension UNNotification: @retroactive @unchecked Sendable {}
+
+// UNUserNotificationCenter is thread-safe
+// https://developer.apple.com/documentation/usernotifications/unusernotificationcenter#overview
+extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
 
 struct StateActionPair<S, A> {
   var state: S
@@ -16,7 +23,7 @@ protocol UuidTagged {
   var uuid: UUID { get }
 }
 
-final class UuidAction<A>: UuidTagged, CustomStringConvertible {
+final class UuidAction<A: Sendable>: UuidTagged, CustomStringConvertible, Sendable {
   let uuid: UUID
   let payload: A
 
@@ -44,7 +51,7 @@ final class UuidState<S>: UuidTagged, CustomStringConvertible {
   }
 }
 
-final class Token: Hashable, CustomStringConvertible {
+final class Token: Hashable, CustomStringConvertible, Sendable {
   func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
   }
@@ -58,7 +65,7 @@ final class Token: Hashable, CustomStringConvertible {
   }
 }
 
-final class Marked<T>: CustomStringConvertible {
+final class Marked<T: Sendable>: CustomStringConvertible, Sendable {
   let mark: Token
   let payload: T
 
@@ -81,6 +88,7 @@ final class Marked<T>: CustomStringConvertible {
   }
 }
 
+#if DEBUG
 final class UiComponentTemplate: UiComponent {
   typealias StateType = State
 
@@ -92,26 +100,25 @@ final class UiComponentTemplate: UiComponent {
     case doSth
   }
 
-  required init(
-    source: Observable<StateType>,
-    emitter: ActionEmitter,
-    state: StateType
-  ) {
+  let uuid = UUID()
+
+  required init(context: ReduxContext, state: StateType) {
+    self.context = context
+
     // set the typed action emit function
-    self.emit = emitter.typedEmit()
+    self.emit = context.actionEmitter.typedEmit()
 
     // init the component with the initial state "state"
     self.someField = state.someField
 
     // react to the new state
-    source
-      .observe(on: MainScheduler.instance)
-      .subscribe(
-        onNext: { _ in
-          Swift.print("Hello, \(self.someField)")
-        }
-      )
-      .disposed(by: self.disposeBag)
+    context.subscribe(uuid: self.uuid) { state in
+      dlog.debug(state)
+    }
+  }
+
+  func cleanup() {
+    self.context.unsubscribe(uuid: self.uuid)
   }
 
   func someAction() {
@@ -119,8 +126,9 @@ final class UiComponentTemplate: UiComponent {
     self.emit(.doSth)
   }
 
+  private let context: ReduxContext
   private let emit: (Action) -> Void
-  private let disposeBag = DisposeBag()
 
   private let someField: String
 }
+#endif

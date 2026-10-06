@@ -6,10 +6,9 @@
 import Cocoa
 import Commons
 import NvimView
-import RxSwift
 import Workspace
 
-struct AppState: Codable {
+struct AppState: Codable, Sendable {
   enum OpenFilesFromApplicationsAction: String, Codable, CaseIterable {
     case inNewWindow
     case inCurrentWindow
@@ -30,6 +29,7 @@ struct AppState: Codable {
     case afterLastWindowAction = "after-last-window-action"
     case activateAsciiImInNormalMode = "activate-ascii-im-in-normal-mode"
     case useSnapshotUpdate = "use-snapshot-update-channel"
+    case nvimAppName = "nvim-appname"
 
     case openQuickly = "open-quickly"
     case mainWindowTemplate = "main-window"
@@ -44,6 +44,7 @@ struct AppState: Codable {
   var activateAsciiImInNormalMode = true
 
   var useSnapshotUpdate = false
+  var nvimAppName = ""
 
   var preferencesOpen = Marked(false)
 
@@ -86,6 +87,10 @@ struct AppState: Codable {
     self.useSnapshotUpdate = try container.decode(
       forKey: .useSnapshotUpdate,
       default: AppState.default.useSnapshotUpdate
+    )
+    self.nvimAppName = try container.decode(
+      forKey: .nvimAppName,
+      default: AppState.default.nvimAppName
     )
 
     self.openQuickly = try container.decode(
@@ -187,7 +192,7 @@ struct HtmlPreviewState {
   var server: Marked<URL>?
 }
 
-struct AppearanceState: Codable {
+struct AppearanceState: Codable, Sendable {
   static let `default` = AppearanceState()
 
   enum CodingKeys: String, CodingKey {
@@ -262,7 +267,15 @@ struct AppearanceState: Codable {
 }
 
 extension MainWindow {
-  struct State: Codable {
+  /// How VimR connects to neovim.
+  enum NvimConnectionMode: String, Codable, CaseIterable, Sendable {
+    /// Classic mode: spawn nvim with --embed, communicate via stdio pipes.
+    case embeddedPipe = "embedded-pipe"
+    /// Launch nvim with --listen, then connect via Unix domain socket.
+    case embeddedSocket = "embedded-socket"
+  }
+
+  struct State: Codable, Sendable {
     static let `default` = State(
       isAllToolsVisible: true,
       isToolButtonsVisible: true,
@@ -304,8 +317,6 @@ extension MainWindow {
 
     var fileBrowserShowHidden = false
 
-    var useLiveResize = false
-
     var isTemporarySession = false
 
     var customMarkdownProcessor = ""
@@ -323,7 +334,11 @@ extension MainWindow {
     var nvimBinary: String = ""
     var nvimArgs: [String]?
     var cliPipePath: String?
-    var envDict: [String: String]?
+    var additionalEnvs: [String: String] = [:]
+    var connectionMode = NvimConnectionMode.embeddedPipe
+
+    /// Set at window creation time for "Connect to Running Neovim" (transient, not serialized).
+    var remoteSocketPath: String?
 
     var usesVcsIgnores = true
 
@@ -354,6 +369,7 @@ extension MainWindow {
 
       case useInteractiveZsh = "use-interactive-zsh"
       case nvimBinary = "nvim-binary"
+      case connectionMode = "connection-mode"
 
       case useLiveResize = "use-live-resize"
       case isShowHidden = "is-show-hidden"
@@ -381,10 +397,11 @@ extension MainWindow {
       )
       self.nvimBinary = try container.decodeIfPresent(String.self, forKey: .nvimBinary) ?? State
         .default.nvimBinary
-      self.useLiveResize = try container.decode(
-        forKey: .useLiveResize,
-        default: State.default.useLiveResize
+      self.connectionMode = try container.decode(
+        forKey: .connectionMode,
+        default: State.default.connectionMode
       )
+
       if let frameRawValue = try container.decodeIfPresent(String.self, forKey: .frame) {
         self.frame = NSRectFromString(frameRawValue)
       } else {
@@ -436,7 +453,7 @@ extension MainWindow {
         return (tool, value)
       }
       let missingTools = MainWindow.Tools.all.subtracting(self.tools.keys)
-      missingTools.forEach { missingTool in
+      for missingTool in missingTools {
         self.tools[missingTool] = MainWindow.State.defaultTools[missingTool]!
       }
 
@@ -457,12 +474,12 @@ extension MainWindow {
       try container.encode(self.isAllToolsVisible, forKey: .allToolsVisible)
       try container.encode(self.isToolButtonsVisible, forKey: .toolButtonsVisible)
       try container.encode(NSStringFromRect(self.frame), forKey: .frame)
-      try container.encode(self.useLiveResize, forKey: .useLiveResize)
       try container.encode(self.customMarkdownProcessor, forKey: .customMarkdownProcessor)
       try container.encode(self.isLeftOptionMeta, forKey: .isLeftOptionMeta)
       try container.encode(self.isRightOptionMeta, forKey: .isRightOptionMeta)
       try container.encode(self.useInteractiveZsh, forKey: .useInteractiveZsh)
       try container.encode(self.nvimBinary, forKey: .nvimBinary)
+      try container.encode(self.connectionMode, forKey: .connectionMode)
       try container.encode(self.fileBrowserShowHidden, forKey: .isShowHidden)
 
       // See [1]
@@ -482,7 +499,7 @@ extension MainWindow {
   }
 }
 
-struct WorkspaceToolState: Codable {
+struct WorkspaceToolState: Codable, Sendable {
   static let `default` = WorkspaceToolState()
 
   enum CodingKeys: String, CodingKey {

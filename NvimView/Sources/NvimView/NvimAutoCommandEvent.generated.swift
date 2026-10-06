@@ -1,8 +1,10 @@
-// Auto generated for nvim v0.9.4
+// Auto generated for nvim v0.12.5
 // See bin/generate_autocmds.py
 
 enum NvimAutoCommandEvent: String {
+
   case bufadd
+  case bufcreate
   case bufdelete
   case bufenter
   case buffilepost
@@ -12,6 +14,7 @@ enum NvimAutoCommandEvent: String {
   case bufmodifiedset
   case bufnew
   case bufnewfile
+  case bufread
   case bufreadcmd
   case bufreadpost
   case bufreadpre
@@ -19,17 +22,19 @@ enum NvimAutoCommandEvent: String {
   case bufwinenter
   case bufwinleave
   case bufwipeout
+  case bufwrite
   case bufwritecmd
   case bufwritepost
   case bufwritepre
   case chaninfo
   case chanopen
-  case cmdundefined
-  case cmdwinenter
-  case cmdwinleave
   case cmdlinechanged
   case cmdlineenter
   case cmdlineleave
+  case cmdlineleavepre
+  case cmdundefined
+  case cmdwinenter
+  case cmdwinleave
   case colorscheme
   case colorschemepre
   case completechanged
@@ -38,6 +43,7 @@ enum NvimAutoCommandEvent: String {
   case cursorhold
   case cursorholdi
   case cursormoved
+  case cursormovedc
   case cursormovedi
   case diagnosticchanged
   case diffupdated
@@ -51,6 +57,7 @@ enum NvimAutoCommandEvent: String {
   case filechangedro
   case filechangedshell
   case filechangedshellpost
+  case fileencoding
   case filereadcmd
   case filereadpost
   case filereadpre
@@ -74,18 +81,28 @@ enum NvimAutoCommandEvent: String {
   case insertleavepre
   case lspattach
   case lspdetach
+  case lspnotify
+  case lspprogress
+  case lsprequest
   case lsptokenupdate
+  case markset
   case menupopup
   case modechanged
   case optionset
+  case packchanged
+  case packchangedpre
+  case progress
   case quickfixcmdpost
   case quickfixcmdpre
   case quitpre
   case recordingenter
   case recordingleave
   case remotereply
+  case safestate
   case searchwrapped
   case sessionloadpost
+  case sessionloadpre
+  case sessionwritepost
   case shellcmdpost
   case shellfilterpost
   case signal
@@ -98,6 +115,7 @@ enum NvimAutoCommandEvent: String {
   case swapexists
   case syntax
   case tabclosed
+  case tabclosedpre
   case tabenter
   case tableave
   case tabnew
@@ -107,6 +125,7 @@ enum NvimAutoCommandEvent: String {
   case termenter
   case termleave
   case termopen
+  case termrequest
   case termresponse
   case textchanged
   case textchangedi
@@ -126,6 +145,7 @@ enum NvimAutoCommandEvent: String {
   case winenter
   case winleave
   case winnew
+  case winnewpre
   case winresized
   case winscrolled
 }

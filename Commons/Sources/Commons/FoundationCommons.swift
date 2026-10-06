@@ -19,57 +19,24 @@ public extension Array {
 }
 
 public extension RandomAccessCollection where Index == Int {
-  func parallelMap<T>(chunkSize: Int = 1, _ transform: @escaping (Element) -> T) -> [T] {
-    let count = self.count
-    guard count > chunkSize else { return self.map(transform) }
-
-    var result = [T?](repeating: nil, count: count)
-
-    // If we don't use Array.withUnsafeMutableBufferPointer,
-    // then we get crashes.
-    result.withUnsafeMutableBufferPointer { pointer in
-      if chunkSize == 1 {
-        DispatchQueue.concurrentPerform(iterations: count) { i in pointer[i] = transform(self[i]) }
-      } else {
-        let chunkCount = Int(ceil(Double(self.count) / Double(chunkSize)))
-        DispatchQueue.concurrentPerform(iterations: chunkCount) { chunkIndex in
-          let start = Swift.min(chunkIndex * chunkSize, count)
-          let end = Swift.min(start + chunkSize, count)
-
-          (start..<end).forEach { i in pointer[i] = transform(self[i]) }
-        }
-      }
-    }
-
-    return result.map { $0! }
-  }
-
-  func groupedRanges<T: Equatable>(with marker: (Element) -> T) -> [ClosedRange<Index>] {
-    if self.isEmpty { return [] }
-    if self.count == 1 { return [self.startIndex...self.startIndex] }
+  func groupedRanges(with marker: (Element) -> some Equatable) -> [ClosedRange<Index>] {
+    guard !self.isEmpty else { return [] }
 
     var result = [ClosedRange<Index>]()
     result.reserveCapacity(self.count / 2)
 
-    let inclusiveEndIndex = self.endIndex - 1
-    var lastStartIndex = self.startIndex
-    var lastEndIndex = self.startIndex
-    var lastMarker = marker(self.first!) // self is not empty!
-    for i in self.startIndex..<self.endIndex {
+    var start = self.startIndex
+    var lastMarker = marker(self[start])
+
+    for i in self.indices.dropFirst() {
       let currentMarker = marker(self[i])
-
-      if lastMarker == currentMarker {
-        if i == inclusiveEndIndex { result.append(lastStartIndex...i) }
-      } else {
-        result.append(lastStartIndex...lastEndIndex)
+      if lastMarker != currentMarker {
+        result.append(start...i - 1)
+        start = i
         lastMarker = currentMarker
-        lastStartIndex = i
-
-        if i == inclusiveEndIndex { result.append(i...i) }
       }
-
-      lastEndIndex = i
     }
+    result.append(start...self.endIndex - 1)
 
     return result
   }
@@ -133,5 +100,3 @@ public extension URL {
 
   var isPackage: Bool { (try? self.resourceValues(forKeys: [.isPackageKey]))?.isPackage ?? false }
 }
-
-private let log = OSLog(subsystem: "com.qvacua.vimr.commons", category: "general")

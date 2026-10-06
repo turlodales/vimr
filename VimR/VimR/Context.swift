@@ -4,113 +4,150 @@
  */
 
 import Foundation
-import RxSwift
+import os
 
-typealias AnyAction = Any
-extension ReduxTypes {
-  typealias StateType = AppState
-  typealias ActionType = AnyAction
-}
+final class ReduxContext {
+  let actionEmitter = ActionEmitter()
 
-final class Context: ReduxContext {
+  private(set) var state: ReduxTypes.StateType
+  private var subscribers: [UUID: (ReduxTypes.StateType) -> Void] = [:]
+
+  init(baseServerUrl url: URL, state: AppState) {
+    self.state = state
+
+    self.setupRedux(baseServerUrl: url)
+  }
+
   // The following should only be used when Cmd-Q'ing
-  func savePrefs() { self.prefMiddleware.applyPref(from: self.state) }
+  func savePrefs() {
+    if let curMainWindow = self.state.currentMainWindow {
+      self.state.mainWindowTemplate = curMainWindow
+    }
 
-  init(baseServerUrl: URL, state: AppState) {
-    super.init(initialState: state)
+    self.prefMiddleware.applyPref(from: self.state)
+  }
+
+  func setupRedux(baseServerUrl: URL) {
+    let uiRootReducer = UiRootReducer()
+    let openQuicklyReducer = OpenQuicklyReducer()
+
+    let appStateReduce = { tuple in
+      [
+        AppDelegateReducer(baseServerUrl: baseServerUrl).reduce,
+        uiRootReducer.mainWindow.reduce,
+        openQuicklyReducer.mainWindow.reduce,
+        openQuicklyReducer.reduce,
+        uiRootReducer.reduce,
+
+        // Preferences
+        PrefWindowReducer().reduce,
+        GeneralPrefReducer().reduce,
+        ToolsPrefReducer().reduce,
+        AppearancePrefReducer().reduce,
+        AdvancedPrefReducer().reduce,
+        KeysPrefReducer().reduce,
+      ].reduce(tuple) { result, reduceBody in reduceBody(result) }
+    }
+
+    let appStateMiddlewareApply = [
+      self.prefMiddleware.mainWindow.apply,
+      self.prefMiddleware.apply,
+    ].reversed().reduce(appStateReduce) { result, middleware in
+      middleware(result)
+    }
 
     let markdownPreviewMiddleware = MarkdownPreviewMiddleware()
     let markdownPreviewReducer = MarkdownPreviewReducer(baseServerUrl: baseServerUrl)
     let htmlPreviewReducer = HtmlPreviewReducer(baseServerUrl: baseServerUrl)
     let httpMiddleware = HttpServerMiddleware(port: baseServerUrl.port!)
-    let uiRootReducer = UiRootReducer()
-    let openQuicklyReducer = OpenQuicklyReducer()
-    let rpcEpic = RpcAppearanceEpic(emitter: self.actionEmitter)
 
-    // AppState
-    self.actionEmitter.observable
-      .map { (state: self.state, action: $0, modified: false) }
-      .reduce(
-        by: [
-          AppDelegateReducer(baseServerUrl: baseServerUrl).reduce,
-          uiRootReducer.mainWindow.reduce,
-          openQuicklyReducer.mainWindow.reduce,
-          openQuicklyReducer.reduce,
-          uiRootReducer.reduce,
+    let mainWinReduce = { tuple in
+      [
+        MainWindowReducer().reduce,
+        markdownPreviewReducer.mainWindow.reduce,
+        markdownPreviewReducer.previewTool.reduce,
+        MarkdownToolReducer(baseServerUrl: baseServerUrl).reduce,
+        htmlPreviewReducer.mainWindow.reduce,
+        htmlPreviewReducer.htmlPreview.reduce,
+        FileBrowserReducer().reduce,
+        BuffersListReducer().reduce,
+        markdownPreviewReducer.buffersList.reduce,
+      ].reduce(tuple) { result, reduceBody in reduceBody(result) }
+    }
 
-          // Preferences
-          PrefWindowReducer().reduce,
-          GeneralPrefReducer().reduce,
-          ToolsPrefReducer().reduce,
-          AppearancePrefReducer().reduce,
-          AdvancedPrefReducer().reduce,
-          KeysPrefReducer().reduce,
-        ],
-        middlewares: [
-          self.prefMiddleware.mainWindow.apply,
-          self.prefMiddleware.apply,
-          rpcEpic.apply,
-        ]
-      )
-      .filter(\.modified)
-      .subscribe(onNext: self.emitAppState)
-      .disposed(by: self.disposeBag)
+    let mainWinMiddlwareApply = [
+      markdownPreviewMiddleware.mainWindow.apply,
+      httpMiddleware.markdownPreview.apply,
+      markdownPreviewMiddleware.markdownTool.apply,
+      HtmlPreviewMiddleware().apply,
+      httpMiddleware.htmlPreviewMainWindow.apply,
+      httpMiddleware.htmlPreviewTool.apply,
+    ].reversed().reduce(mainWinReduce) { result, middleware in
+      middleware(result)
+    }
 
-    // MainWindow.State
-    self.actionEmitter.observable
-      .compactMap { action in
-        guard let uuidAction = action as? UuidTagged else { return nil }
+    self.actionEmitter.subscribe { action in
+      var modified = false
 
-        guard let mainWindowState = self.state.mainWindows[uuidAction.uuid] else { return nil }
+      let tuple = ReduceTuple(state: self.state, action: action, modified: false)
 
-        return (mainWindowState, action, false)
+      dlog.trace("AppState Redux tuple before reducing: \(tuple)")
+      let result = appStateMiddlewareApply(tuple)
+      dlog.trace("AppState Redux tuple after AppState reduce: \(tuple)")
+
+      if result.modified {
+        self.state = result.state
+        modified = true
+      } else {
+        dlog.debug("AppState not mofified")
       }
-      .reduce(
-        by: [
-          MainWindowReducer().reduce,
-          markdownPreviewReducer.mainWindow.reduce,
-          markdownPreviewReducer.previewTool.reduce,
-          MarkdownToolReducer(baseServerUrl: baseServerUrl).reduce,
-          htmlPreviewReducer.mainWindow.reduce,
-          htmlPreviewReducer.htmlPreview.reduce,
-          FileBrowserReducer().reduce,
-          BuffersListReducer().reduce,
-          markdownPreviewReducer.buffersList.reduce,
-        ],
-        middlewares: [
-          markdownPreviewMiddleware.mainWindow.apply,
-          httpMiddleware.markdownPreview.apply,
-          markdownPreviewMiddleware.markdownTool.apply,
-          HtmlPreviewMiddleware().apply,
-          httpMiddleware.htmlPreviewMainWindow.apply,
-          httpMiddleware.htmlPreviewTool.apply,
-        ]
-      )
-      .filter(\.modified)
-      .subscribe(onNext: self.emitAppState)
-      .disposed(by: self.disposeBag)
+
+      if let uuidAction = action as? UuidTagged,
+         let mainWindowState = self.state.mainWindows[uuidAction.uuid]
+      {
+        let tuple = ReduceTuple(state: mainWindowState, action: action, modified: false)
+
+        dlog.trace("MainWin \(uuidAction.uuid) Redux tuple before reducing: \(tuple)")
+        let result = mainWinMiddlwareApply(tuple)
+        dlog.trace("MainWin \(uuidAction.uuid) Redux tuple after reduce: \(tuple)")
+
+        if result.modified {
+          self.state.mainWindows[uuidAction.uuid] = result.state
+          modified = true
+        } else {
+          dlog.debug("MainWin \(uuidAction.uuid) state not mofified")
+        }
+      }
+
+      guard modified else {
+        dlog.debug("No need to notify subscribers")
+        return
+      }
+
+      for subscriber in self.subscribers.values {
+        subscriber(self.state)
+      }
+
+      self.cleanUpAppState()
+    }
+  }
+
+  deinit {
+    self.subscribers.removeAll()
+  }
+
+  func subscribe(uuid: UUID, subscription: @escaping (ReduxTypes.StateType) -> Void) {
+    self.subscribers[uuid] = subscription
+  }
+
+  func unsubscribe(uuid: UUID) {
+    self.subscribers[uuid] = nil
   }
 
   private let prefMiddleware = PrefMiddleware()
 
-  private func emitAppState(_ tuple: (state: MainWindow.State, action: AnyAction, modified: Bool)) {
-    guard let uuidAction = tuple.action as? UuidTagged else { return }
-
-    self.state.mainWindows[uuidAction.uuid] = tuple.state
-    self.stateSubject.onNext(self.state)
-
-    self.cleanUpAppState()
-  }
-
-  private func emitAppState(_ tuple: ReduxTypes.ReduceTuple) {
-    self.state = tuple.state
-    self.stateSubject.onNext(self.state)
-
-    self.cleanUpAppState()
-  }
-
   private func cleanUpAppState() {
-    self.state.mainWindows.keys.forEach { uuid in
+    for uuid in self.state.mainWindows.keys {
       self.state.mainWindows[uuid]?.cwdToSet = nil
       self.state.mainWindows[uuid]?.currentBufferToSet = nil
       self.state.mainWindows[uuid]?.viewToBeFocused = nil

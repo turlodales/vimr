@@ -1,9 +1,9 @@
 /// Tae Won Ha - http://taewon.de - @hataewon
 /// See LICENSE
 
-@testable import Ignore
 import Nimble
 import XCTest
+@testable import Ignore
 
 private struct IgnoreSplittingTestSpec {
   var fileName: String
@@ -41,7 +41,7 @@ private let ignoreSplittingTestSpecs = [
 
 final class IgnoreSplitTest: XCTestCase {
   func testIgnoreSplitting() {
-    ignoreSplittingTestSpecs.forEach { spec in
+    for spec in ignoreSplittingTestSpecs {
       let url = Bundle.module.url(
         forResource: "IgnoreCollectionTest",
         withExtension: nil,

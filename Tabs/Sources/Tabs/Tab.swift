@@ -107,8 +107,8 @@ extension Tab {
 
   private func adjustColors(_ newIsSelected: Bool) {
     if newIsSelected {
-      self.layer?.backgroundColor = self.theme.tabBackgroundColor.cgColor
-      self.titleView.textColor = self.theme.tabForegroundColor
+      self.layer?.backgroundColor = self.theme.selectedBackgroundColor.cgColor
+      self.titleView.textColor = self.theme.selectedForegroundColor
       self.closeButton.image = self.theme.selectedCloseButtonImage
     } else {
       self.layer?.backgroundColor = self.theme.backgroundColor.cgColor
@@ -138,8 +138,12 @@ extension Tab {
       + self.titleView.intrinsicContentSize.width
     let targetWidth = min(max(self.theme.tabMinWidth, idealWidth), self.theme.tabMaxWidth)
 
-    if let c = self.widthConstraint { self.removeConstraint(c) }
-    self.widthConstraint = self.autoSetDimension(.width, toSize: targetWidth)
+    // Reuse the existing constraint to avoid churning the layout engine.
+    if let c = self.widthConstraint {
+      c.constant = targetWidth
+    } else {
+      self.widthConstraint = self.autoSetDimension(.width, toSize: targetWidth)
+    }
   }
 
   private func addViews() {
